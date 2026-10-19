@@ -5,10 +5,12 @@ import { useAsync } from '../lib/hooks.js';
 import { Async, Field } from '../components/ui.jsx';
 import { errorKey, imageUrl } from '../lib/supabase.js';
 import { productAvailability } from '../lib/shop.js';
+import { useAdmin } from './context.js';
 import { ALLOWED_IMAGES, MAX_IMAGE_BYTES, adminCategories, adminProduct, adminProducts, deleteProduct, saveProduct } from '../services/admin.js';
 
 export function ProductList() {
   const { t, loc, money } = useSettings();
+  const { can } = useAdmin();
   const state = useAsync(adminProducts, []);
   const remove = async (p) => {
     if (!window.confirm(t('common.confirmDelete'))) return;
@@ -16,7 +18,7 @@ export function ProductList() {
   };
   return (
     <>
-      <div className="row"><h1>{t('admin.nav.products')}</h1><Link className="btn btn-primary" to="/admin/products/new">{t('admin.products.new')}</Link></div>
+      <div className="row"><h1>{t('admin.nav.products')}</h1>{can('products.create') && <Link className="btn btn-primary" to="/admin/products/new">{t('admin.products.new')}</Link>}</div>
       <Async state={state} empty={t('admin.products.empty')} isEmpty={(d) => d.length === 0}>
         {(d) => (
           <div className="table-wrap"><table>
@@ -31,8 +33,8 @@ export function ProductList() {
                   <td>{money(p.sale_price ?? p.price)}</td>
                   <td>{p.is_published ? t('common.yes') : t('common.no')}</td>
                   <td>{available ? t('common.yes') : t('common.no')}</td>
-                  <td className="actions"><Link className="btn" to={`/admin/products/${p.id}`}>{t('common.edit')}</Link>
-                    <button className="btn btn-ghost" onClick={() => remove(p)}>{t('common.delete')}</button></td>
+                  <td className="actions">{can('products.update') && <Link className="btn" to={`/admin/products/${p.id}`}>{t('common.edit')}</Link>}
+                    {can('products.delete') && <button className="btn btn-ghost" onClick={() => remove(p)}>{t('common.delete')}</button>}</td>
                 </tr>
               );
             })}</tbody>
@@ -43,7 +45,12 @@ export function ProductList() {
   );
 }
 
-const EMPTY = { name_ar: '', name_fr: '', description_ar: '', description_fr: '', price: '', sale_price: '', category_id: '', is_published: false, is_featured: false, is_available: true };
+const toLocal = (iso) => {
+  if (!iso) return '';
+  const d = new Date(iso); const z = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}T${z(d.getHours())}:${z(d.getMinutes())}`;
+};
+const EMPTY = { sale_starts_at: '', sale_ends_at: '', name_ar: '', name_fr: '', description_ar: '', description_fr: '', price: '', sale_price: '', category_id: '', is_published: false, is_featured: false, is_available: true };
 const EMPTY_VARIANT = { label_ar: '', label_fr: '', color: '', size: '', capacity: '', is_available: true };
 
 export function ProductForm() {
@@ -58,7 +65,7 @@ function FormBody({ initial }) {
   const { t, loc } = useSettings();
   const navigate = useNavigate();
   const cats = useAsync(adminCategories, []);
-  const [p, setP] = useState(initial ? { ...EMPTY, ...initial, sale_price: initial.sale_price ?? '' } : EMPTY);
+  const [p, setP] = useState(initial ? { ...EMPTY, ...initial, sale_price: initial.sale_price ?? '', sale_starts_at: toLocal(initial.sale_starts_at), sale_ends_at: toLocal(initial.sale_ends_at) } : EMPTY);
   const [variants, setVariants] = useState(initial?.product_variants || []);
   const [removedVariantIds, setRemovedVariantIds] = useState([]);
   const [images, setImages] = useState(initial?.product_images || []);
@@ -89,6 +96,7 @@ function FormBody({ initial }) {
     const price = Number(p.price);
     const sale = p.sale_price === '' ? null : Number(p.sale_price);
     return p.name_ar.trim() && p.name_fr.trim() && p.price !== '' && price >= 0 && (sale == null || (sale >= 0 && sale < price))
+      && !(p.sale_starts_at && p.sale_ends_at && new Date(p.sale_ends_at) <= new Date(p.sale_starts_at))
       && variants.every((v) => v.label_ar.trim() && v.label_fr.trim());
   };
 
@@ -114,6 +122,8 @@ function FormBody({ initial }) {
         <Field label={t('admin.f.descFr')} htmlFor="d_fr"><textarea id="d_fr" dir="ltr" rows="4" value={p.description_fr} onChange={set('description_fr')} /></Field>
         <Field label={t('admin.f.price')} htmlFor="price"><input id="price" type="number" min="0" step="0.01" value={p.price} onChange={set('price')} required /></Field>
         <Field label={t('admin.f.sale')} htmlFor="sale"><input id="sale" type="number" min="0" step="0.01" value={p.sale_price} onChange={set('sale_price')} /></Field>
+        <Field label={t('admin.f.saleStart')} htmlFor="ss"><input id="ss" type="datetime-local" value={p.sale_starts_at} onChange={set('sale_starts_at')} /></Field>
+        <Field label={t('admin.f.saleEnd')} htmlFor="se"><input id="se" type="datetime-local" value={p.sale_ends_at} onChange={set('sale_ends_at')} /></Field>
         <Field label={t('admin.f.category')} htmlFor="cat">
           <select id="cat" value={p.category_id || ''} onChange={set('category_id')}>
             <option value="">{t('admin.f.none')}</option>

@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { addToCart, cartCount, cartSubtotal, removeLine, setQty } from '../lib/shop.js';
+import { addToCart, cartCount, cartSubtotal, removeLine, setQty, unitPrice } from '../lib/shop.js';
 import { fetchProductsByIds } from '../services/catalog.js';
 
 const Ctx = createContext(null);
@@ -32,7 +32,7 @@ export function CartProvider({ children }) {
     setItems((cur) => cur.map((it) => {
       const p = byId.get(it.productId);
       if (!p) return { ...it, unavailable: true };
-      const price = p.sale_price != null && Number(p.sale_price) < Number(p.price) ? Number(p.sale_price) : Number(p.price);
+      const price = unitPrice(p);
       const v = it.variantId ? (p.product_variants || []).find((x) => x.id === it.variantId) : null;
       const unavailable = it.variantId ? !v || !v.is_available : !p.is_available || (p.product_variants || []).length > 0;
       if (price !== Number(it.price)) changed = true;

@@ -4,10 +4,11 @@ import { useSettings } from '../context/SettingsContext.jsx';
 import { useAsync } from '../lib/hooks.js';
 import { Async, Field, Logo } from '../components/ui.jsx';
 import { errorKey } from '../lib/supabase.js';
-import { ORDER_STATUSES, ORDER_TRANSITIONS } from '../lib/shop.js';
+import { ORDER_STATUSES, allowedNextStatuses, whatsappMessage, whatsappUrl } from '../lib/shop.js';
+import { useAdmin } from './context.js';
 import {
-  adminCategories, adminOrder, adminOrders, adminShipping, dashboard, deleteCategory, deleteShipping,
-  saveCategory, saveShipping, setOrderStatus, signIn,
+  adminCategories, adminOrder, adminOrders, adminShipping, dashboard, deleteCategory, deleteShipping, orderHistory,
+  saveCategory, saveShipping, setOrderStatus, signIn, updatePassword,
 } from '../services/admin.js';
 
 export function Login() {
@@ -97,17 +98,31 @@ function CategoryRow({ c, onSave, onDelete }) {
 
 export function Orders() {
   const { t, lang, money } = useSettings();
-  const [status, setStatus] = useState('');
-  const state = useAsync(() => adminOrders(status), [status]);
+  const empty = { number: '', status: '', phone: '', city: '', from: '', to: '' };
+  const [draft, setDraft] = useState(empty);
+  const [filters, setFilters] = useState(empty);
+  const state = useAsync(() => adminOrders(filters), [JSON.stringify(filters)]);
   const fmt = (d) => new Date(d).toLocaleString(lang === 'ar' ? 'ar-MA-u-nu-latn' : 'fr-MA', { dateStyle: 'short', timeStyle: 'short' });
+  const set = (k) => (e) => setDraft({ ...draft, [k]: e.target.value });
+  const apply = (e) => { e.preventDefault(); setFilters(draft); };
+  const reset = () => { setDraft(empty); setFilters(empty); };
   return (
     <>
       <h1>{t('admin.nav.orders')}</h1>
-      <div className="field narrow"><label htmlFor="st">{t('admin.orders.filter')}</label>
-        <select id="st" value={status} onChange={(e) => setStatus(e.target.value)}>
-          <option value="">{t('common.all')}</option>
-          {ORDER_STATUSES.map((s) => <option key={s} value={s}>{t(`status.${s}`)}</option>)}
-        </select></div>
+      <form onSubmit={apply} className="filters-orders" role="search">
+        <Field label={t('admin.orders.search')} htmlFor="f-num"><input id="f-num" inputMode="numeric" value={draft.number} onChange={set('number')} maxLength={12} /></Field>
+        <Field label={t('admin.orders.filter')} htmlFor="f-st">
+          <select id="f-st" value={draft.status} onChange={set('status')}>
+            <option value="">{t('common.all')}</option>
+            {ORDER_STATUSES.map((s) => <option key={s} value={s}>{t(`status.${s}`)}</option>)}
+          </select>
+        </Field>
+        <Field label={t('admin.orders.phone')} htmlFor="f-ph"><input id="f-ph" dir="ltr" inputMode="tel" value={draft.phone} onChange={set('phone')} maxLength={20} /></Field>
+        <Field label={t('admin.orders.city')} htmlFor="f-city"><input id="f-city" value={draft.city} onChange={set('city')} maxLength={40} /></Field>
+        <Field label={t('admin.orders.from')} htmlFor="f-from"><input id="f-from" type="date" value={draft.from} onChange={set('from')} /></Field>
+        <Field label={t('admin.orders.to')} htmlFor="f-to"><input id="f-to" type="date" value={draft.to} onChange={set('to')} /></Field>
+        <div className="row"><button className="btn btn-primary">{t('common.search')}</button><button type="button" className="btn btn-ghost" onClick={reset}>{t('admin.orders.reset')}</button></div>
+      </form>
       <Async state={state} empty={t('admin.orders.empty')} isEmpty={(d) => d.length === 0}>
         {(d) => (
           <div className="table-wrap"><table>
@@ -126,51 +141,92 @@ export function Orders() {
   );
 }
 
-export function OrderDetail({ canManage }) {
+export function OrderDetail() {
   const { id } = useParams();
   const { t, lang, loc, money } = useSettings();
+  const { can } = useAdmin();
   const state = useAsync(() => adminOrder(id), [id]);
+  const hist = useAsync(() => orderHistory(id), [id]);
   const [msg, setMsg] = useState(null);
+  const [note, setNote] = useState('');
+  const fmt = (d) => new Date(d).toLocaleString(lang === 'ar' ? 'ar-MA-u-nu-latn' : 'fr-MA', { dateStyle: 'short', timeStyle: 'short' });
+
   const change = async (s) => {
     setMsg(null);
-    try { await setOrderStatus(id, s); state.reload(); } catch (e) { setMsg(t(errorKey(e))); }
+    try { await setOrderStatus(id, s, note); setNote(''); state.reload(); hist.reload(); } catch (e) { setMsg(t(errorKey(e))); }
   };
   return (
     <Async state={state}>
-      {(o) => (
-        <>
-          <p><Link to="/admin/orders">← {t('common.back')}</Link></p>
-          <h1 dir="ltr">#{o.order_number} <span className={`pill st-${o.status}`}>{t(`status.${o.status}`)}</span></h1>
-          <dl className="contact">
-            <dt>{t('admin.orders.customer')}</dt><dd>{o.customer_name} — <a dir="ltr" href={`tel:${o.phone}`}>{o.phone}</a></dd>
-            <dt>{t('checkout.city')}</dt><dd>{o.city}</dd>
-            <dt>{t('admin.orders.address')}</dt><dd>{o.address}</dd>
-            {o.notes && <><dt>{t('admin.orders.notes')}</dt><dd>{o.notes}</dd></>}
-          </dl>
-          <h2>{t('admin.orders.items')}</h2>
-          <div className="table-wrap"><table>
-            <tbody>{o.order_items.map((i) => (
-              <tr key={i.id}>
-                <td>{loc(i, 'product_name')}{(i.variant_label_ar || i.variant_label_fr) && <> — {loc(i, 'variant_label')}</>}</td>
-                <td>{money(i.unit_final_price)}{i.discount_per_unit > 0 && <small className="muted"> ({t('product.sale')} −{money(i.discount_per_unit)})</small>}</td>
-                <td>× {i.quantity}</td><td>{money(i.line_total)}</td>
-              </tr>))}</tbody>
-          </table></div>
-          <div className="summary">
-            <p className="row"><span>{t('cart.subtotal')}</span><strong>{money(o.subtotal)}</strong></p>
-            <p className="row"><span>{t('checkout.shipping')}</span><strong>{money(o.shipping_fee)}</strong></p>
-            <p className="row total"><span>{t('checkout.total')}</span><strong>{money(o.total)}</strong></p>
-          </div>
-          {canManage && (
+      {(o) => {
+        const next = allowedNextStatuses(o.status, can);
+        const wa = whatsappUrl(o.phone, whatsappMessage(lang, {
+          firstName: o.customer_name.split(' ')[0], orderNumber: o.order_number,
+          items: o.order_items.map((i) => ({ name: loc(i, 'product_name'), variant: loc(i, 'variant_label'), qty: i.quantity })),
+          total: Number(o.total), currency: t('common.currency'), city: o.city,
+          trackUrl: `${window.location.origin}/track?code=${o.tracking_code}`,
+        }));
+        return (
+          <>
+            <p><Link to="/admin/orders">← {t('common.back')}</Link></p>
+            <h1 dir="ltr">#{o.order_number} <span className={`pill st-${o.status}`}>{t(`status.${o.status}`)}</span></h1>
+            <dl className="contact">
+              <dt>{t('admin.orders.customer')}</dt>
+              <dd>{o.customer_name} — <a dir="ltr" href={`tel:${o.phone}`}>{o.phone}</a>
+                {can('customers.view') && o.customer_id && <> · <Link to={`/admin/customers/${o.customer_id}`}>{t('admin.orders.viewCustomer')}</Link></>}</dd>
+              <dt>{t('checkout.city')}</dt><dd>{o.city}</dd>
+              <dt>{t('admin.orders.address')}</dt><dd>{o.address}</dd>
+              {o.notes && <><dt>{t('admin.orders.notes')}</dt><dd>{o.notes}</dd></>}
+              <dt>{t('admin.orders.tracking')}</dt><dd dir="ltr" className="code">{o.tracking_code}</dd>
+              {o.coupon_code && <><dt>{t('admin.orders.coupon')}</dt><dd dir="ltr">{o.coupon_code} (−{money(o.coupon_discount)})</dd></>}
+            </dl>
+            {wa && (
+              <p><a className="btn" href={wa} target="_blank" rel="noopener noreferrer">{t('admin.orders.whatsapp')}</a>
+                <small className="muted"> {t('admin.orders.whatsappNote')}</small></p>
+            )}
+            <h2>{t('admin.orders.items')}</h2>
+            <div className="table-wrap"><table>
+              <tbody>{o.order_items.map((i) => (
+                <tr key={i.id}>
+                  <td>{loc(i, 'product_name')}{(i.variant_label_ar || i.variant_label_fr) && <> — {loc(i, 'variant_label')}</>}</td>
+                  <td>{money(i.unit_final_price)}{i.discount_per_unit > 0 && <small className="muted"> ({t('product.sale')} −{money(i.discount_per_unit)})</small>}</td>
+                  <td>× {i.quantity}</td><td>{money(i.line_total)}</td>
+                </tr>))}</tbody>
+            </table></div>
+            <div className="summary">
+              <p className="row"><span>{t('cart.subtotal')}</span><strong>{money(o.subtotal)}</strong></p>
+              {o.coupon_discount > 0 && <p className="row"><span>{t('checkout.couponDiscount')}</span><strong>−{money(o.coupon_discount)}</strong></p>}
+              <p className="row"><span>{t('checkout.shipping')}</span><strong>{money(o.shipping_fee)}</strong></p>
+              <p className="row total"><span>{t('checkout.total')}</span><strong>{money(o.total)}</strong></p>
+            </div>
+
             <section>
               <h2>{t('admin.orders.changeStatus')}</h2>
-              {ORDER_TRANSITIONS[o.status].length === 0 ? <p className="muted">{t('admin.orders.noNext')}</p>
-                : <div className="row">{ORDER_TRANSITIONS[o.status].map((s) => <button key={s} className="btn" onClick={() => change(s)}>{t(`status.${s}`)}</button>)}</div>}
+              {next.length === 0 ? <p className="muted">{t('admin.orders.noNext')}</p> : (
+                <>
+                  <Field label={t('admin.orders.note')} htmlFor="note"><input id="note" value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} /></Field>
+                  <div className="row">{next.map((s) => <button key={s} className="btn" onClick={() => change(s)}>{t(`status.${s}`)}</button>)}</div>
+                </>
+              )}
               {msg && <p className="bad" role="alert">{msg}</p>}
             </section>
-          )}
-        </>
-      )}
+
+            <h2>{t('admin.orders.history')}</h2>
+            <Async state={hist}>
+              {(h) => (
+                <ul className="history">
+                  {h.map((r) => (
+                    <li key={r.id}>
+                      {r.from_status ? <>{t(`status.${r.from_status}`)} → </> : null}<strong>{t(`status.${r.to_status}`)}</strong>{' '}
+                      <span className="muted">{fmt(r.created_at)}{!r.changed_by && ` · ${t('admin.orders.system')}`}</span>
+                      {r.note && <div className="muted">“{r.note}”</div>}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Async>
+          </>
+        );
+      }}
     </Async>
   );
 }
@@ -216,6 +272,13 @@ function RateRow({ r, onSave, onDelete }) {
 
 export function Settings() {
   const { t, lang, setLang, theme, setTheme } = useSettings();
+  const [pw, setPw] = useState('');
+  const [pwMsg, setPwMsg] = useState(null);
+  const savePw = async (e) => {
+    e.preventDefault(); setPwMsg(null);
+    if (pw.length < 10) { setPwMsg({ bad: true, text: t('admin.pw.short') }); return; }
+    try { await updatePassword(pw); setPw(''); setPwMsg({ bad: false, text: t('common.saved') }); } catch (err) { setPwMsg({ bad: true, text: t(errorKey(err)) }); }
+  };
   return (
     <>
       <h1>{t('admin.nav.settings')}</h1>
@@ -228,7 +291,12 @@ export function Settings() {
         </Field>
       </div>
       <p className="muted">{t('admin.settings.note')}</p>
-      <p className="muted">{t('admin.settings.roles')}</p>
+      <form onSubmit={savePw} className="admin-form">
+        <h2>{t('admin.pw.title')}</h2>
+        <Field label={t('admin.pw.new')} htmlFor="newpw"><input id="newpw" type="password" autoComplete="new-password" dir="ltr" value={pw} onChange={(e) => setPw(e.target.value)} /></Field>
+        {pwMsg && <p className={pwMsg.bad ? 'bad' : 'ok'} role="status">{pwMsg.text}</p>}
+        <button className="btn">{t('common.save')}</button>
+      </form>
     </>
   );
 }

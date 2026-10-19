@@ -10,6 +10,13 @@ export function OrderSuccess() {
       <h1>{t('success.title')}</h1>
       <p>{t('success.number')}: <strong dir="ltr">#{state.orderNumber}</strong></p>
       <p>{t('success.total')}: <strong>{money(state.total)}</strong></p>
+      {state.trackingCode && (
+        <>
+          <p>{t('success.tracking')}: <strong dir="ltr" className="code">{state.trackingCode}</strong></p>
+          <p className="muted">{t('success.trackHint')}</p>
+          <p><Link to={`/track?code=${state.trackingCode}`}>{t('success.trackLink')}</Link></p>
+        </>
+      )}
       <p>{t('success.next')}</p>
       <Link className="btn btn-primary" to="/products">{t('success.continue')}</Link>
     </section>

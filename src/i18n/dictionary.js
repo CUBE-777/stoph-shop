@@ -1,5 +1,7 @@
 // All UI strings. Keys must exist in BOTH languages.
-export const dictionary = {
+import { phase2 } from './phase2.js';
+
+const base = {
   ar: {
     'nav.home': 'الرئيسية', 'nav.products': 'المنتجات', 'nav.delivery': 'التوصيل والسياسات', 'nav.contact': 'تواصل معنا',
     'nav.cart': 'السلة', 'nav.menu': 'القائمة', 'nav.lang': 'Français', 'nav.theme': 'تبديل المظهر',
@@ -161,4 +163,9 @@ export const dictionary = {
     'admin.settings.lang': 'Langue', 'admin.settings.theme': 'Thème', 'admin.settings.note': 'Votre choix est enregistré dans ce navigateur.',
     'admin.settings.roles': 'La gestion du personnel et des rôles arrive en phase 2 (la structure existe déjà en base).',
   },
+};
+
+export const dictionary = {
+  ar: { ...base.ar, ...phase2.ar },
+  fr: { ...base.fr, ...phase2.fr },
 };

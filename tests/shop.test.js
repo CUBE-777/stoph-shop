@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {
   normalizePhone, unitPrice, discountPercent, productAvailability, validateCheckout,
   addToCart, setQty, removeLine, cartSubtotal, lineKey, pickShippingFee, canTransition, slugify, MAX_QTY,
+  saleActive, allowedNextStatuses, ORDER_TRANSITIONS, ORDER_STATUSES, toIntlPhone, whatsappMessage, whatsappUrl,
+  normalizeTrackingCode, normalizeCoupon, TRACKING_CODE_RE,
 } from '../src/lib/shop.js';
 
 test('phone normalisation accepts Moroccan formats and rejects junk', () => {
@@ -70,4 +72,51 @@ test('order status transitions', () => {
 test('slugify', () => {
   assert.equal(slugify('Montre Élégante 2'), 'montre-elegante-2');
   assert.equal(slugify('ساعة'), '');
+});
+
+test('sale window: only active inside its dates', () => {
+  const now = new Date('2026-06-15T12:00:00Z');
+  const base = { price: 100, sale_price: 70 };
+  assert.equal(saleActive(base, now), true);
+  assert.equal(saleActive({ ...base, sale_starts_at: '2026-06-16T00:00:00Z' }, now), false);
+  assert.equal(saleActive({ ...base, sale_ends_at: '2026-06-14T00:00:00Z' }, now), false);
+  assert.equal(saleActive({ ...base, sale_starts_at: '2026-06-01T00:00:00Z', sale_ends_at: '2026-07-01T00:00:00Z' }, now), true);
+  assert.equal(unitPrice({ ...base, sale_ends_at: '2026-06-14T00:00:00Z' }, now), 100);
+  assert.equal(discountPercent({ ...base, sale_ends_at: '2026-06-14T00:00:00Z' }, now), 0);
+});
+
+test('role-based transitions: support cannot cancel, manager can', () => {
+  const support = new Set(['orders.view', 'orders.update_status']);
+  const manager = new Set(['orders.view', 'orders.update_status', 'orders.cancel']);
+  assert.deepEqual(allowedNextStatuses('pending_confirmation', (p) => support.has(p)), ['confirmed']);
+  assert.deepEqual(allowedNextStatuses('pending_confirmation', (p) => manager.has(p)).sort(), ['cancelled', 'confirmed']);
+  assert.deepEqual(allowedNextStatuses('cancelled', () => true), []);
+});
+
+test('transition table is consistent with the statuses list', () => {
+  for (const [from, tos] of Object.entries(ORDER_TRANSITIONS)) {
+    assert.ok(ORDER_STATUSES.includes(from));
+    for (const to of Object.keys(tos)) assert.ok(ORDER_STATUSES.includes(to), `${from}->${to}`);
+  }
+  assert.ok(canTransition('confirmed', 'preparing'));
+  assert.ok(!canTransition('preparing', 'delivered'));
+});
+
+test('WhatsApp: international number and limited message (no full address)', () => {
+  assert.equal(toIntlPhone('0612345678'), '212612345678');
+  assert.equal(toIntlPhone('bad'), null);
+  const msg = whatsappMessage('fr', { firstName: 'Sara', orderNumber: 1001, items: [{ name: 'Montre', variant: 'Noir', qty: 2 }], total: 240, currency: 'MAD', city: 'Fès', trackUrl: 'https://x.test/track?code=SS-ABCDEF0123' });
+  assert.match(msg, /#1001/);
+  assert.match(msg, /Montre \(Noir\) × 2/);
+  const url = whatsappUrl('0612345678', msg);
+  assert.ok(url.startsWith('https://wa.me/212612345678?text='));
+  assert.equal(whatsappUrl('bad', msg), null);
+  assert.match(whatsappMessage('ar', { firstName: 'سارة', orderNumber: 5, items: [], total: 1, currency: 'درهم', city: 'فاس' }), /طلبك رقم #5/);
+});
+
+test('tracking code and coupon normalisation', () => {
+  assert.equal(normalizeTrackingCode('  ss-abcdef0123 '), 'SS-ABCDEF0123');
+  assert.ok(TRACKING_CODE_RE.test('SS-ABCDEF0123'));
+  assert.ok(!TRACKING_CODE_RE.test('SS-ZZZ'));
+  assert.equal(normalizeCoupon(' welcome 10 '), 'WELCOME10');
 });

@@ -10,7 +10,7 @@ export default function Layout() {
   const { count } = useCart();
   const [open, setOpen] = useState(false);
   const close = () => setOpen(false);
-  const nav = [['/', t('nav.home'), true], ['/products', t('nav.products')], ['/delivery', t('nav.delivery')], ['/contact', t('nav.contact')]];
+  const nav = [['/', t('nav.home'), true], ['/products', t('nav.products')], ['/track', t('nav.track')], ['/delivery', t('nav.delivery')], ['/contact', t('nav.contact')]];
 
   return (
     <>

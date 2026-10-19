@@ -16,14 +16,19 @@ export function normalizePhone(raw) {
   return /^0[5-7]\d{8}$/.test(p) ? p : null;
 }
 
-export function unitPrice(p) {
-  const price = Number(p.price);
-  const sale = p.sale_price == null ? null : Number(p.sale_price);
-  return sale != null && sale < price ? sale : price;
+// A sale price counts only inside its (optional) time window. The server applies the same rule with its own clock.
+export function saleActive(p, now = new Date()) {
+  if (p.sale_price == null || !(Number(p.sale_price) < Number(p.price))) return false;
+  const start = p.sale_starts_at ? new Date(p.sale_starts_at) : null;
+  const end = p.sale_ends_at ? new Date(p.sale_ends_at) : null;
+  return (!start || start <= now) && (!end || end > now);
 }
-export const isOnSale = (p) => unitPrice(p) < Number(p.price);
-export function discountPercent(p) {
-  return isOnSale(p) ? Math.round((1 - unitPrice(p) / Number(p.price)) * 100) : 0;
+export function unitPrice(p, now = new Date()) {
+  return saleActive(p, now) ? Number(p.sale_price) : Number(p.price);
+}
+export const isOnSale = (p, now) => saleActive(p, now);
+export function discountPercent(p, now) {
+  return saleActive(p, now) ? Math.round((1 - Number(p.sale_price) / Number(p.price)) * 100) : 0;
 }
 
 // A product with variants is available if at least one variant is available.
@@ -74,16 +79,44 @@ export function pickShippingFee(rates, city) {
   return def ? Number(def.fee) : null;
 }
 
-export const ORDER_STATUSES = ['pending_confirmation', 'confirmed', 'shipped', 'delivered', 'cancelled', 'returned'];
+export const ORDER_STATUSES = ['new', 'pending_confirmation', 'confirmed', 'preparing', 'shipped', 'delivered', 'cancelled', 'returned'];
+
+// from -> { to: permission required }. MUST mirror the order_transitions table (the server is the authority).
 export const ORDER_TRANSITIONS = {
-  pending_confirmation: ['confirmed', 'cancelled'],
-  confirmed: ['shipped', 'cancelled'],
-  shipped: ['delivered', 'returned'],
-  delivered: ['returned'],
-  cancelled: [],
-  returned: [],
+  new: { pending_confirmation: 'orders.update_status', confirmed: 'orders.update_status', cancelled: 'orders.cancel' },
+  pending_confirmation: { confirmed: 'orders.update_status', cancelled: 'orders.cancel' },
+  confirmed: { preparing: 'orders.update_status', shipped: 'orders.update_status', cancelled: 'orders.cancel' },
+  preparing: { shipped: 'orders.update_status', cancelled: 'orders.cancel' },
+  shipped: { delivered: 'orders.update_status', returned: 'orders.cancel' },
+  delivered: { returned: 'orders.cancel' },
+  cancelled: {},
+  returned: {},
 };
-export const canTransition = (from, to) => (ORDER_TRANSITIONS[from] || []).includes(to);
+export const canTransition = (from, to) => Object.hasOwn(ORDER_TRANSITIONS[from] || {}, to);
+// Next statuses this staff member may choose (can = (permission) => boolean).
+export const allowedNextStatuses = (from, can) =>
+  Object.entries(ORDER_TRANSITIONS[from] || {}).filter(([, perm]) => can(perm)).map(([to]) => to);
+
+// ---- phone / WhatsApp (manual sending only: we just open a prepared chat) ----
+export function toIntlPhone(raw) {
+  const p = normalizePhone(raw);
+  return p ? `212${p.slice(1)}` : null;
+}
+export function whatsappMessage(lang, { firstName, orderNumber, items, total, currency, city, trackUrl }) {
+  const list = items.map((i) => `• ${i.name}${i.variant ? ` (${i.variant})` : ''} × ${i.qty}`).join('\n');
+  if (lang === 'fr') {
+    return `Bonjour ${firstName},\nVotre commande #${orderNumber} chez Stoph Shop :\n${list}\nTotal à payer à la livraison : ${total} ${currency}\nVille : ${city}\n${trackUrl ? `Suivi : ${trackUrl}\n` : ''}Pouvez-vous confirmer votre commande ? Merci !`;
+  }
+  return `مرحباً ${firstName}،\nطلبك رقم #${orderNumber} من Stoph Shop:\n${list}\nالمبلغ المطلوب عند الاستلام: ${total} ${currency}\nالمدينة: ${city}\n${trackUrl ? `التتبع: ${trackUrl}\n` : ''}هل تؤكد طلبك؟ شكراً!`;
+}
+export function whatsappUrl(phone, text) {
+  const intl = toIntlPhone(phone);
+  return intl ? `https://wa.me/${intl}?text=${encodeURIComponent(text)}` : null;
+}
+
+export const TRACKING_CODE_RE = /^SS-[0-9A-F]{10}$/;
+export const normalizeTrackingCode = (s) => String(s || '').trim().toUpperCase();
+export const normalizeCoupon = (s) => String(s || '').trim().toUpperCase().replace(/\s+/g, '');
 
 export function slugify(s) {
   return String(s || '')

@@ -51,15 +51,35 @@ export async function getShippingRates() {
   return data;
 }
 
-// The only write a visitor can make. Prices/fees are NOT sent: the server computes them.
-export async function placeOrder(form, items) {
+const cartPayload = (items) => items.map((i) => ({ product_id: i.productId, variant_id: i.variantId || null, quantity: i.qty }));
+
+// Server-computed totals for the checkout page (no write). Prices/fees/discounts are never sent by the browser.
+export async function quoteOrder(items, city, coupon, phone) {
+  const { data, error } = await supabase.rpc('quote_order', {
+    p_items: cartPayload(items), p_city: city || null, p_coupon: coupon || null, p_phone: phone || null,
+  });
+  fail(error);
+  return data; // { subtotal, product_discount, coupon_discount, shipping_fee, total, coupon_code } or { error }
+}
+
+// The only write a visitor can make. Coupon problems come back as { error } so they can be rate limited.
+export async function placeOrder(form, items, coupon) {
   const { data, error } = await supabase.rpc('create_order', {
     p_customer: {
       full_name: form.full_name.trim(), phone: form.phone, city: form.city.trim(),
       address: form.address.trim(), notes: (form.notes || '').trim(),
     },
-    p_items: items.map((i) => ({ product_id: i.productId, variant_id: i.variantId || null, quantity: i.qty })),
+    p_items: cartPayload(items),
+    p_coupon: coupon || null,
   });
   fail(error);
+  if (data?.error) { const e = new Error(data.error); throw e; }
   return data;
+}
+
+// Public tracking: code + phone, answered by a limited server function (never a table read).
+export async function trackOrder(code, phone) {
+  const { data, error } = await supabase.rpc('track_order', { p_code: code, p_phone: phone });
+  fail(error);
+  return data; // { found: false } | { found: true, status, items, history, ... }
 }
