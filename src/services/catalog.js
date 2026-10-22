@@ -1,5 +1,7 @@
 import { supabase } from '../lib/supabase.js';
 
+// Listing cards need far fewer columns than the detail page (no descriptions): smaller payloads.
+const CARD_SELECT = 'id, slug, name_ar, name_fr, price, sale_price, sale_starts_at, sale_ends_at, is_available, is_featured, created_at, product_images(path, alt, sort_order), product_variants(id, is_available)';
 const PRODUCT_SELECT = '*, product_images(path, alt, sort_order), product_variants(*), categories(slug, name_ar, name_fr)';
 const sortChildren = (p) => ({
   ...p,
@@ -16,8 +18,9 @@ export async function listCategories() {
 
 export const PAGE_SIZE = 24;
 
-export async function listProducts({ categoryId, search, sort = 'new', minPrice, maxPrice, featured, limit = PAGE_SIZE } = {}) {
-  let q = supabase.from('products').select(PRODUCT_SELECT);
+// offset + limit = one page ("load more" appends the next page instead of re-downloading everything).
+export async function listProducts({ categoryId, search, sort = 'new', minPrice, maxPrice, featured, limit = PAGE_SIZE, offset = 0 } = {}) {
+  let q = supabase.from('products').select(CARD_SELECT);
   if (categoryId) q = q.eq('category_id', categoryId);
   if (featured) q = q.eq('is_featured', true);
   if (minPrice !== '' && minPrice != null && !Number.isNaN(Number(minPrice))) q = q.gte('price', Number(minPrice));
@@ -27,7 +30,8 @@ export async function listProducts({ categoryId, search, sort = 'new', minPrice,
   if (sort === 'priceAsc') q = q.order('price', { ascending: true });
   else if (sort === 'priceDesc') q = q.order('price', { ascending: false });
   else q = q.order('created_at', { ascending: false });
-  const { data, error } = await q.limit(limit);
+  q = q.order('id'); // stable order across pages when prices tie
+  const { data, error } = await q.range(offset, offset + limit - 1);
   fail(error);
   return data.map(sortChildren);
 }

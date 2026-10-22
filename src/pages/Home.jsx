@@ -3,9 +3,11 @@ import { useSettings } from '../context/SettingsContext.jsx';
 import { useAsync } from '../lib/hooks.js';
 import { listCategories, listProducts } from '../services/catalog.js';
 import { Async, ProductCard } from '../components/ui.jsx';
+import { usePageMeta } from '../lib/meta.js';
 
 export default function Home() {
   const { t, loc } = useSettings();
+  usePageMeta({ title: t('home.cta'), description: t('meta.home'), path: '/' });
   const cats = useAsync(listCategories, []);
   const featured = useAsync(() => listProducts({ featured: true, limit: 8 }), []);
   return (

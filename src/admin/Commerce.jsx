@@ -81,44 +81,74 @@ export function Reports() {
   const today = new Date();
   const [from, setFrom] = useState(iso(new Date(today.getTime() - 29 * 86400000)));
   const [to, setTo] = useState(iso(today));
-  const [range, setRange] = useState({ from, to });
-  const state = useAsync(() => adminReport(range.from, range.to), [range.from, range.to]);
+  const [group, setGroup] = useState('day');
+  const [range, setRange] = useState({ from, to, group });
+  const state = useAsync(() => adminReport(range.from, range.to, range.group), [range.from, range.to, range.group]);
   return (
     <>
       <h1>{t('admin.nav.reports')}</h1>
-      <form className="filters" onSubmit={(e) => { e.preventDefault(); setRange({ from, to }); }}>
+      <form className="filters" onSubmit={(e) => { e.preventDefault(); setRange({ from, to, group }); }}>
         <Field label={t('admin.rep.from')} htmlFor="rf"><input id="rf" type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></Field>
         <Field label={t('admin.rep.to')} htmlFor="rt"><input id="rt" type="date" value={to} onChange={(e) => setTo(e.target.value)} /></Field>
+        <Field label={t('admin.rep.group')} htmlFor="rg">
+          <select id="rg" value={group} onChange={(e) => setGroup(e.target.value)}>
+            <option value="day">{t('admin.rep.byDay')}</option><option value="week">{t('admin.rep.byWeek')}</option><option value="month">{t('admin.rep.byMonth')}</option>
+          </select>
+        </Field>
         <button className="btn btn-primary">{t('admin.rep.run')}</button>
       </form>
       <p className="muted">{t('admin.rep.rules')}</p>
+      <p className="muted"><strong>{t('admin.rep.notProfit')}</strong></p>
       <Async state={state}>
         {(r) => {
-          const maxDay = Math.max(1, ...r.by_day.map((d) => d.orders));
+          const maxP = Math.max(1, ...r.by_period.map((d) => d.orders));
           return (
             <>
+              <h2>{t('admin.rep.ordersBlock')}</h2>
               <div className="stats">
                 <div className="stat"><strong>{r.orders_total}</strong><span>{t('admin.rep.total')}</span></div>
-                <div className="stat"><strong>{money(r.sales.amount)}</strong><span>{t('admin.rep.sales')} · {r.sales.count}</span></div>
+                <div className="stat"><strong>{r.groups.new}</strong><span>{t('admin.rep.new')}</span></div>
+                <div className="stat"><strong>{r.groups.confirmed}</strong><span>{t('admin.rep.confirmed')}</span></div>
+                <div className="stat"><strong>{r.groups.delivered}</strong><span>{t('admin.rep.delivered')}</span></div>
                 <div className="stat"><strong>{r.cancelled.count}</strong><span>{t('admin.rep.cancelled')} · {money(r.cancelled.amount)}</span></div>
                 <div className="stat"><strong>{r.returned.count}</strong><span>{t('admin.rep.returned')} · {money(r.returned.amount)}</span></div>
               </div>
+              <h2>{t('admin.rep.salesBlock')}</h2>
+              <div className="stats">
+                <div className="stat"><strong>{money(r.sales.amount)}</strong><span>{t('admin.rep.sales')} · {r.sales.count}</span></div>
+                <div className="stat"><strong>{money(r.sales.products_amount)}</strong><span>{t('admin.rep.productsAmount')}</span></div>
+                <div className="stat"><strong>{money(r.delivered_in_period.amount)}</strong><span>{t('admin.rep.deliveredInPeriod')} · {r.delivered_in_period.count}</span></div>
+              </div>
+              <h2>{t('admin.rep.shippingDiscounts')}</h2>
+              <div className="stats">
+                <div className="stat"><strong>{money(r.shipping.delivered_fees)}</strong><span>{t('admin.rep.shipFees')}</span></div>
+                <div className="stat"><strong>{money(r.shipping.average_fee)}</strong><span>{t('admin.rep.shipAvg')} · {r.shipping.free_shipping_orders} {t('admin.rep.freeShip')}</span></div>
+                <div className="stat"><strong>{money(r.discounts.coupon_total)}</strong><span>{t('admin.rep.couponTotal')} · {r.discounts.orders_with_coupon}</span></div>
+                <div className="stat"><strong>{money(r.discounts.product_discount_total)}</strong><span>{t('admin.rep.productDiscounts')}</span></div>
+              </div>
               <h2>{t('admin.dash.byStatus')}</h2>
               <ul className="status-list">{ORDER_STATUSES.map((s) => <li key={s}><span>{t(`status.${s}`)}</span><strong>{r.by_status[s] || 0}</strong></li>)}</ul>
+              <h2>{t('admin.rep.returnsBlock')} <small className="muted">({t('admin.rep.openReturns')}: {r.open_returns})</small></h2>
+              {r.returns_by_reason.length === 0 ? <p className="muted">{t('ret.empty')}</p> : (
+                <div className="table-wrap"><table>
+                  <thead><tr><th>{t('ret.type')}</th><th>{t('ret.reason')}</th><th>{t('admin.rep.ordersCol')}</th></tr></thead>
+                  <tbody>{r.returns_by_reason.map((x, i) => <tr key={i}><td>{t(`ret.kind.${x.kind}`)}</td><td>{t(`ret.reason.${x.reason}`)}</td><td>{x.count}</td></tr>)}</tbody>
+                </table></div>
+              )}
               <h2>{t('admin.rep.top')}</h2>
               <div className="table-wrap"><table>
-                <thead><tr><th></th><th>{t('admin.rep.qty')}</th><th>{t('admin.rep.amount')}</th></tr></thead>
-                <tbody>{r.top_products.map((p, i) => <tr key={i}><td>{p.name_fr || p.name_ar}</td><td>{p.quantity}</td><td>{money(p.amount)}</td></tr>)}</tbody>
+                <thead><tr><th></th><th>{t('admin.rep.qty')}</th><th>{t('admin.rep.deliveredQty')}</th><th>{t('admin.rep.amount')}</th></tr></thead>
+                <tbody>{r.top_products.map((p, i) => <tr key={i}><td>{p.name_fr || p.name_ar}</td><td>{p.quantity}</td><td>{p.delivered_quantity}</td><td>{money(p.amount)}</td></tr>)}</tbody>
               </table></div>
               <h2>{t('admin.rep.cities')}</h2>
               <div className="table-wrap"><table>
                 <thead><tr><th></th><th>{t('admin.rep.ordersCol')}</th><th>{t('admin.rep.sales')}</th></tr></thead>
                 <tbody>{r.by_city.map((c, i) => <tr key={i}><td>{c.city}</td><td>{c.orders}</td><td>{money(c.sales)}</td></tr>)}</tbody>
               </table></div>
-              <h2>{t('admin.rep.days')}</h2>
-              <div className="bars">{r.by_day.map((d) => (
-                <div className="bar-row" key={d.day}><span dir="ltr">{d.day}</span>
-                  <span className="bar-fill" style={{ width: `${(d.orders / maxDay) * 100}%` }} role="img" aria-label={`${d.orders}`} />
+              <h2>{t('admin.rep.period')}</h2>
+              <div className="bars">{r.by_period.map((d) => (
+                <div className="bar-row" key={d.period}><span dir="ltr">{d.period}</span>
+                  <span className="bar-fill" style={{ width: `${(d.orders / maxP) * 100}%` }} role="img" aria-label={`${d.orders}`} />
                   <span>{d.orders} · {money(d.sales)}</span></div>))}</div>
             </>
           );

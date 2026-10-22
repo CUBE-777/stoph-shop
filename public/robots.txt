@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /cart
+Disallow: /checkout
+Disallow: /order-success
+Disallow: /track
+
+# After you know your final domain, add:  Sitemap: https://YOUR-DOMAIN/sitemap.xml
+# (generate it with: npm run sitemap — see docs/05-DEPLOY.md)

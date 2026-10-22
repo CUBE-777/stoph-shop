@@ -5,9 +5,11 @@ import { Field } from '../components/ui.jsx';
 import { errorKey } from '../lib/supabase.js';
 import { TRACKING_CODE_RE, normalizePhone, normalizeTrackingCode, toLatinDigits } from '../lib/shop.js';
 import { trackOrder } from '../services/catalog.js';
+import { usePageMeta } from '../lib/meta.js';
 
 export default function Track() {
   const { t, lang, loc, money } = useSettings();
+  usePageMeta({ title: t('track.title'), noindex: true });
   const [params] = useSearchParams();
   const [code, setCode] = useState(params.get('code') || '');
   const [phone, setPhone] = useState('');

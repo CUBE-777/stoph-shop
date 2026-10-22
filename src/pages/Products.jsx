@@ -1,16 +1,18 @@
 import { useEffect, useState } from 'react';
+import { usePageMeta } from '../lib/meta.js';
 import { useSearchParams } from 'react-router-dom';
 import { useSettings } from '../context/SettingsContext.jsx';
 import { useAsync } from '../lib/hooks.js';
 import { listCategories, listProducts, PAGE_SIZE } from '../services/catalog.js';
 import { Async, ProductCard } from '../components/ui.jsx';
+import { errorKey } from '../lib/supabase.js';
 
 export default function Products() {
   const { t, loc } = useSettings();
   const [params, setParams] = useSearchParams();
   const get = (k, d = '') => params.get(k) ?? d;
   const [q, setQ] = useState(get('q'));
-  const [pages, setPages] = useState(1);
+  const [extra, setExtra] = useState({ items: [], page: 0, done: false, busy: false, error: null });
   const cats = useAsync(listCategories, []);
 
   const slug = get('category');
@@ -18,12 +20,20 @@ export default function Products() {
   const filters = { search: get('q'), sort: get('sort', 'new'), minPrice: get('min'), maxPrice: get('max') };
   const catPending = slug && !cats.data; // wait until the slug can be resolved
 
-  useEffect(() => { setPages(1); }, [slug, filters.search, filters.sort, filters.minPrice, filters.maxPrice]);
+  usePageMeta({ title: t('products.title'), description: t('meta.products'), path: '/products' });
+  useEffect(() => { setExtra({ items: [], page: 0, done: false, busy: false, error: null }); }, [slug, filters.search, filters.sort, filters.minPrice, filters.maxPrice]);
   const list = useAsync(
-    () => (catPending ? Promise.resolve(null) : listProducts({ ...filters, categoryId: slug ? categoryId || '00000000-0000-0000-0000-000000000000' : undefined, limit: PAGE_SIZE * pages })),
-    [slug, categoryId, catPending, filters.search, filters.sort, filters.minPrice, filters.maxPrice, pages],
+    () => (catPending ? Promise.resolve(null) : listProducts({ ...filters, categoryId: slug ? categoryId || '00000000-0000-0000-0000-000000000000' : undefined, limit: PAGE_SIZE })),
+    [slug, categoryId, catPending, filters.search, filters.sort, filters.minPrice, filters.maxPrice],
   );
 
+  const loadMore = (offset) => async () => {
+    setExtra((x) => ({ ...x, busy: true, error: null }));
+    try {
+      const more = await listProducts({ ...filters, categoryId: slug ? categoryId || '00000000-0000-0000-0000-000000000000' : undefined, limit: PAGE_SIZE, offset });
+      setExtra((x) => ({ ...x, items: [...x.items, ...more], busy: false, done: more.length < PAGE_SIZE }));
+    } catch (e) { setExtra((x) => ({ ...x, busy: false, error: errorKey(e) })); }
+  };
   const setParam = (k, v) => { const n = new URLSearchParams(params); if (v) n.set(k, v); else n.delete(k); setParams(n, { replace: true }); };
   const submit = (e) => { e.preventDefault(); setParam('q', q.trim()); };
   const reset = () => { setQ(''); setParams({}, { replace: true }); };
@@ -62,10 +72,11 @@ export default function Products() {
       <Async state={catPending ? { loading: true, error: null, data: null } : list} empty={<>{t('products.empty')}</>} isEmpty={(d) => d.length === 0}>
         {(d) => (
           <>
-            <p className="muted" aria-live="polite">{d.length} {t('products.count')}</p>
-            <div className="grid">{d.map((p) => <ProductCard key={p.id} product={p} />)}</div>
-            {d.length >= PAGE_SIZE * pages && (
-              <p className="center"><button className="btn" onClick={() => setPages(pages + 1)}>{t('common.more')}</button></p>
+            <p className="muted" aria-live="polite">{d.length + extra.items.length} {t('products.count')}</p>
+            <div className="grid">{[...d, ...extra.items].map((p) => <ProductCard key={p.id} product={p} />)}</div>
+            {extra.error && <p className="bad" role="alert">{t(extra.error)}</p>}
+            {!extra.done && d.length >= PAGE_SIZE && (
+              <p className="center"><button className="btn" disabled={extra.busy} onClick={loadMore(d.length + extra.items.length)}>{extra.busy ? t('common.loading') : t('common.more')}</button></p>
             )}
           </>
         )}

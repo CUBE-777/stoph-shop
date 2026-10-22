@@ -2,6 +2,7 @@
 // database functions decide what is allowed — nothing here is trusted by the server.
 import { BUCKET, supabase } from '../lib/supabase.js';
 import { slugify } from '../lib/shop.js';
+import { prepareImage } from '../lib/image.js';
 
 const ok = ({ data, error }) => { if (error) throw error; return data; };
 
@@ -78,9 +79,10 @@ export async function saveProduct({ product, variants, removedVariantIds, images
   }
   for (const [i, im] of images.entries()) {
     if (im.id) { await supabase.from('product_images').update({ sort_order: i }).eq('id', im.id).then(ok); continue; }
-    const ext = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }[im.file.type];
+    const file = await prepareImage(im.file);   // max 1600px WebP; original kept if conversion fails or is larger
+    const ext = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }[file.type];
     const path = `${id}/${crypto.randomUUID()}.${ext}`;
-    const up = await supabase.storage.from(BUCKET).upload(path, im.file, { contentType: im.file.type, cacheControl: '31536000' });
+    const up = await supabase.storage.from(BUCKET).upload(path, file, { contentType: file.type, cacheControl: '31536000' });
     if (up.error) throw up.error;
     await supabase.from('product_images').insert({ product_id: id, path, alt: row.name_fr, sort_order: i }).then(ok);
   }
@@ -94,19 +96,15 @@ export async function deleteProduct(id) {
 }
 
 // ---- orders ----
-// filters: { number, status, phone, city, from, to } (dates are yyyy-mm-dd, Casablanca day boundaries)
-const cleanLike = (v) => String(v).replace(/[%,()*\\]/g, ' ').trim().slice(0, 40);
-export function adminOrders(f = {}) {
-  let q = supabase.from('orders')
-    .select('id, order_number, customer_name, phone, city, status, total, created_at, tracking_code')
-    .order('created_at', { ascending: false }).limit(200);
-  if (f.status) q = q.eq('status', f.status);
-  if (f.number && /^\d{1,12}$/.test(String(f.number).trim())) q = q.eq('order_number', Number(f.number));
-  if (f.phone) { const d = String(f.phone).replace(/\D/g, ''); if (d) q = q.ilike('phone', `%${d.replace(/^212/, '').replace(/^0/, '')}%`); }
-  if (f.city) q = q.ilike('city', `%${cleanLike(f.city)}%`);
-  if (f.from) q = q.gte('created_at', `${f.from}T00:00:00+01:00`);
-  if (f.to) q = q.lt('created_at', new Date(new Date(`${f.to}T00:00:00+01:00`).getTime() + 86400000).toISOString());
-  return q.then(ok);
+// Server-side search + pagination (Casablanca day boundaries, no LIKE injection). Returns { rows, total }.
+export const ORDERS_PAGE = 25;
+export async function adminOrders(f = {}, page = 0) {
+  const rows = await supabase.rpc('admin_search_orders', {
+    p_number: f.number && /^\d{1,12}$/.test(String(f.number).trim()) ? Number(f.number) : null,
+    p_status: f.status || null, p_phone: f.phone || null, p_city: f.city || null,
+    p_from: f.from || null, p_to: f.to || null, p_limit: ORDERS_PAGE, p_offset: page * ORDERS_PAGE,
+  }).then(ok);
+  return { rows, total: rows[0]?.total_count ?? 0 };
 }
 export const adminOrder = (id) => supabase.from('orders').select('*, order_items(*)').eq('id', id).single().then(ok);
 export const orderHistory = (id) => supabase.from('order_status_history').select('*').eq('order_id', id).order('created_at').order('id').then(ok);
@@ -140,7 +138,7 @@ export function saveCoupon(c) {
 export const deleteCoupon = (id) => supabase.from('coupons').delete().eq('id', id).then(ok);
 
 // ---- reports / audit ----
-export const adminReport = (from, to) => supabase.rpc('admin_report', { p_from: from, p_to: to }).then(ok);
+export const adminReport = (from, to, group = 'day') => supabase.rpc('admin_report', { p_from: from, p_to: to, p_group: group }).then(ok);
 export const auditLogs = () => supabase.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(200).then(ok);
 
 // ---- staff & roles (all writes go through server functions that enforce the rules) ----
@@ -181,3 +179,30 @@ export async function saveShipping(r) {
 }
 export const deleteShipping = (id) => supabase.from('shipping_rates').delete().eq('id', id).eq('is_default', false).then(ok);
 export const isOwner = () => supabase.rpc('is_owner').then(ok);
+
+// ---- Phase 3: cancellations & returns (all writes through server functions) ----
+export const cancelOrder = (orderId, reason, note) =>
+  supabase.rpc('cancel_order', { p_order_id: orderId, p_reason: reason, p_note: note || null }).then(ok);
+export const registerReturn = (orderId, reason, note, received = false) =>
+  supabase.rpc('register_return', { p_order_id: orderId, p_reason: reason, p_note: note || null, p_received: !!received }).then(ok);
+export const updateReturn = (id, status, adminNotes) =>
+  supabase.rpc('update_return', { p_return_id: id, p_status: status, p_admin_notes: adminNotes || null }).then(ok);
+export const RETURNS_PAGE = 25;
+export async function adminReturns(status, page = 0) {
+  const rows = await supabase.rpc('admin_returns', { p_status: status || null, p_limit: RETURNS_PAGE, p_offset: page * RETURNS_PAGE }).then(ok);
+  return { rows, total: rows[0]?.total_count ?? 0 };
+}
+export const orderReturns = (orderId) => supabase.rpc('admin_order_returns', { p_order_id: orderId }).then(ok);
+
+// ---- Phase 3: MFA (Supabase Auth TOTP; no custom crypto) ----
+export const mfaStatus = () => supabase.rpc('mfa_status').then(ok);
+export const mfaAal = () => supabase.auth.mfa.getAuthenticatorAssuranceLevel().then(ok);
+export const mfaFactors = () => supabase.auth.mfa.listFactors().then(ok);        // { totp: [...verified], all: [...] }
+export const mfaEnroll = (friendlyName) => supabase.auth.mfa.enroll({ factorType: 'totp', friendlyName }).then(ok); // { id, totp: { qr_code, secret } }
+export async function mfaVerify(factorId, code) {
+  const ch = await supabase.auth.mfa.challenge({ factorId }).then(ok);
+  return supabase.auth.mfa.verify({ factorId, challengeId: ch.id, code: String(code).replace(/\s/g, '') }).then(ok);
+}
+export const mfaUnenroll = (factorId) => supabase.auth.mfa.unenroll({ factorId }).then(ok);   // needs an aal2 session
+export const setMfaEnforcement = (on) => supabase.rpc('set_mfa_enforcement', { p_on: on }).then(ok);
+export const setRoleRequiresMfa = (roleId, on) => supabase.rpc('set_role_requires_mfa', { p_role_id: roleId, p_on: on }).then(ok);

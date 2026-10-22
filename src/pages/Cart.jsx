@@ -1,3 +1,4 @@
+import { usePageMeta } from '../lib/meta.js';
 import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useSettings } from '../context/SettingsContext.jsx';
@@ -39,6 +40,7 @@ export function CartLines({ editable = true }) {
 }
 
 export default function Cart() {
+  usePageMeta({ title: useSettings().t('nav.cart'), noindex: true });
   const { t, money } = useSettings();
   const { items, subtotal, refresh, priceChanged, hasUnavailable } = useCart();
   useEffect(() => { refresh().catch(() => {}); /* eslint-disable-next-line */ }, []);

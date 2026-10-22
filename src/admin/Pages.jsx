@@ -4,10 +4,11 @@ import { useSettings } from '../context/SettingsContext.jsx';
 import { useAsync } from '../lib/hooks.js';
 import { Async, Field, Logo } from '../components/ui.jsx';
 import { errorKey } from '../lib/supabase.js';
-import { ORDER_STATUSES, allowedNextStatuses, whatsappMessage, whatsappUrl } from '../lib/shop.js';
+import { GENERIC_STATUS_TARGETS, ORDER_STATUSES, whatsappMessage, whatsappUrl } from '../lib/shop.js';
+import { CancelReturnPanel, OrderReturnsList, Pager } from './Returns.jsx';
 import { useAdmin } from './context.js';
 import {
-  adminCategories, adminOrder, adminOrders, adminShipping, dashboard, deleteCategory, deleteShipping, orderHistory,
+  ORDERS_PAGE, adminCategories, adminOrder, adminOrders, adminShipping, dashboard, deleteCategory, deleteShipping, orderHistory,
   saveCategory, saveShipping, setOrderStatus, signIn, updatePassword,
 } from '../services/admin.js';
 
@@ -43,7 +44,7 @@ export function Dashboard() {
         {(d) => (
           <>
             <div className="stats">
-              {[['today', d.orders_today], ['pending', d.pending], ['revenue', money(d.delivered_revenue)], ['published', d.published_products], ['unavailable', d.unavailable_products]]
+              {[['today', d.orders_today], ['pending', d.pending], ['revenue', money(d.delivered_revenue)], ['returns', d.open_returns ?? 0], ['published', d.published_products], ['unavailable', d.unavailable_products]]
                 .map(([k, v]) => <div className="stat" key={k}><strong>{v}</strong><span>{t(`admin.dash.${k}`)}</span></div>)}
             </div>
             <h2>{t('admin.dash.byStatus')}</h2>
@@ -101,11 +102,12 @@ export function Orders() {
   const empty = { number: '', status: '', phone: '', city: '', from: '', to: '' };
   const [draft, setDraft] = useState(empty);
   const [filters, setFilters] = useState(empty);
-  const state = useAsync(() => adminOrders(filters), [JSON.stringify(filters)]);
+  const [page, setPage] = useState(0);
+  const state = useAsync(() => adminOrders(filters, page), [JSON.stringify(filters), page]);
   const fmt = (d) => new Date(d).toLocaleString(lang === 'ar' ? 'ar-MA-u-nu-latn' : 'fr-MA', { dateStyle: 'short', timeStyle: 'short' });
   const set = (k) => (e) => setDraft({ ...draft, [k]: e.target.value });
-  const apply = (e) => { e.preventDefault(); setFilters(draft); };
-  const reset = () => { setDraft(empty); setFilters(empty); };
+  const apply = (e) => { e.preventDefault(); setPage(0); setFilters(draft); };
+  const reset = () => { setDraft(empty); setFilters(empty); setPage(0); };
   return (
     <>
       <h1>{t('admin.nav.orders')}</h1>
@@ -123,8 +125,9 @@ export function Orders() {
         <Field label={t('admin.orders.to')} htmlFor="f-to"><input id="f-to" type="date" value={draft.to} onChange={set('to')} /></Field>
         <div className="row"><button className="btn btn-primary">{t('common.search')}</button><button type="button" className="btn btn-ghost" onClick={reset}>{t('admin.orders.reset')}</button></div>
       </form>
-      <Async state={state} empty={t('admin.orders.empty')} isEmpty={(d) => d.length === 0}>
-        {(d) => (
+      <Async state={state} empty={t('admin.orders.empty')} isEmpty={(d) => d.rows.length === 0}>
+        {({ rows: d, total }) => (
+          <>
           <div className="table-wrap"><table>
             <thead><tr><th>{t('admin.orders.number')}</th><th>{t('admin.orders.customer')}</th><th>{t('checkout.city')}</th><th>{t('checkout.total')}</th><th>{t('admin.orders.date')}</th><th></th></tr></thead>
             <tbody>{d.map((o) => (
@@ -135,6 +138,8 @@ export function Orders() {
               </tr>
             ))}</tbody>
           </table></div>
+          <Pager page={page} total={total} size={ORDERS_PAGE} onPage={setPage} />
+          </>
         )}
       </Async>
     </>
@@ -149,6 +154,7 @@ export function OrderDetail() {
   const hist = useAsync(() => orderHistory(id), [id]);
   const [msg, setMsg] = useState(null);
   const [note, setNote] = useState('');
+  const [rk, setRk] = useState(0);
   const fmt = (d) => new Date(d).toLocaleString(lang === 'ar' ? 'ar-MA-u-nu-latn' : 'fr-MA', { dateStyle: 'short', timeStyle: 'short' });
 
   const change = async (s) => {
@@ -158,7 +164,7 @@ export function OrderDetail() {
   return (
     <Async state={state}>
       {(o) => {
-        const next = allowedNextStatuses(o.status, can);
+        const next = GENERIC_STATUS_TARGETS(o.status, can);
         const wa = whatsappUrl(o.phone, whatsappMessage(lang, {
           firstName: o.customer_name.split(' ')[0], orderNumber: o.order_number,
           items: o.order_items.map((i) => ({ name: loc(i, 'product_name'), variant: loc(i, 'variant_label'), qty: i.quantity })),
@@ -209,6 +215,9 @@ export function OrderDetail() {
               )}
               {msg && <p className="bad" role="alert">{msg}</p>}
             </section>
+
+            <CancelReturnPanel order={o} onChanged={() => { state.reload(); hist.reload(); setRk((k) => k + 1); }} />
+            <OrderReturnsList orderId={o.id} reloadKey={rk} onChanged={() => { state.reload(); hist.reload(); }} />
 
             <h2>{t('admin.orders.history')}</h2>
             <Async state={hist}>

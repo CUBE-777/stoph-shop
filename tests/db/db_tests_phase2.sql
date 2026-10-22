@@ -1,6 +1,7 @@
 -- Stoph Shop — Phase 2 database tests. Run AFTER 01-09 on a DEVELOPMENT project, in the SQL Editor.
 -- Runs inside a transaction that is ROLLED BACK. Any failure raises an exception with "FAIL ...".
 -- Success message: ALL PHASE 2 DB TESTS PASSED.
+-- NOTE (Phase 3): run this file AFTER migrations 10 and 11 too; the cancel step now uses cancel_order().
 begin;
 
 create temp table _base as select count(*)::int as n from public.orders;
@@ -219,7 +220,7 @@ begin
   perform public.set_order_status(oid_, 'preparing');
   perform public.set_order_status(oid_, 'shipped');
   perform public.set_order_status(oid_, 'delivered');
-  perform public.set_order_status((select id from public.orders where phone = '0611111111' limit 1), 'cancelled', 'customer refused');
+  perform public.cancel_order((select id from public.orders where phone = '0611111111' limit 1), 'customer_changed_mind', 'customer refused');  -- Phase 3: cancelling needs a reason record
   r := public.admin_report(today, today);
   select coalesce(sum(total), 0) into expected from public.orders
     where status = 'delivered' and (created_at at time zone 'Africa/Casablanca')::date = today;

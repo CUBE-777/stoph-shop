@@ -71,9 +71,16 @@ export const cartSubtotal = (items) => items.reduce((s, x) => s + Number(x.price
 export const cartCount = (items) => items.reduce((s, x) => s + x.qty, 0);
 
 // Preview only — the server computes the real fee.
+// Mirrors SQL city_key(): lower-case, French accents removed, punctuation/spaces collapsed.
+export function cityKey(s) {
+  return String(s ?? '').trim().toLowerCase()
+    .replace(/[àâäáã]/g, 'a').replace(/ç/g, 'c').replace(/[éèêë]/g, 'e').replace(/[íìîï]/g, 'i').replace(/ñ/g, 'n')
+    .replace(/[óòôöõ]/g, 'o').replace(/[úùûü]/g, 'u').replace(/[ýÿ]/g, 'y')
+    .replace(/[\s\-_'’.]+/g, ' ').trim();
+}
 export function pickShippingFee(rates, city) {
-  const c = (city || '').trim().toLowerCase();
-  const exact = rates.find((r) => !r.is_default && r.city && r.city.toLowerCase() === c);
+  const c = cityKey(city);
+  const exact = rates.find((r) => !r.is_default && r.city && cityKey(r.city) === c);
   if (exact) return Number(exact.fee);
   const def = rates.find((r) => r.is_default);
   return def ? Number(def.fee) : null;
@@ -123,3 +130,47 @@ export function slugify(s) {
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 }
+
+// ---- Phase 3: returns & cancellations (mirror of migration 11; the server is the authority) ----
+export const RETURN_REASONS = ['customer_changed_mind', 'defective', 'wrong_item', 'not_as_described', 'refused_at_delivery', 'unreachable', 'duplicate_order', 'out_of_stock', 'other'];
+export const RETURN_STATUSES = ['requested', 'approved', 'rejected', 'received', 'closed'];
+export const RETURN_TRANSITIONS = { requested: ['approved', 'rejected'], approved: ['received'], rejected: [], received: [], closed: [] };
+export const canReturnTransition = (from, to) => (RETURN_TRANSITIONS[from] || []).includes(to);
+// A return can be registered only for shipped / delivered orders; cancelling only before shipping.
+export const canRegisterReturn = (orderStatus) => ['shipped', 'delivered'].includes(orderStatus);
+export const canCancelOrder = (orderStatus) => ['new', 'pending_confirmation', 'confirmed', 'preparing'].includes(orderStatus);
+// Reason "other" needs a written note (same rule as the server's note_required).
+export function validateReason(reason, note) {
+  if (!RETURN_REASONS.includes(reason)) return 'invalid_reason';
+  const n = String(note || '').trim();
+  if (n.length > 500) return 'invalid_notes';
+  if (reason === 'other' && n.length < 3) return 'note_required';
+  return null;
+}
+// Generic status path may NOT reach cancelled/returned any more.
+export const GENERIC_STATUS_TARGETS = (from, can) => allowedNextStatuses(from, can).filter((s) => s !== 'cancelled' && s !== 'returned');
+
+// ---- Phase 3: MFA gate decisions (what the admin app shows after sign-in) ----
+// aal: {currentLevel, nextLevel} from supabase.auth.mfa.getAuthenticatorAssuranceLevel(); status: mfa_status() RPC.
+export function mfaGate(aal, status) {
+  const hasFactor = aal?.nextLevel === 'aal2';
+  if (hasFactor && aal.currentLevel !== 'aal2') return 'challenge';           // enrolled: must enter a code
+  if (status?.enforced && status?.required && !hasFactor) return 'enroll';   // required but nothing enrolled yet
+  return 'ok';
+}
+
+// ---- Phase 3: image upload sizing (client-side compression, free; Supabase image transformations are a paid feature) ----
+export function fitWithin(width, height, max = 1600) {
+  if (!(width > 0) || !(height > 0)) return { width: 0, height: 0 };
+  const scale = Math.min(1, max / Math.max(width, height));
+  return { width: Math.round(width * scale), height: Math.round(height * scale) };
+}
+
+// ---- Phase 3: SEO helpers ----
+export function sitemapXml(origin, products, now = new Date()) {
+  const esc = (x) => String(x).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  const urls = ['/', '/products', '/track', '/delivery', '/contact'].map((p) => ({ loc: `${origin}${p}` }))
+    .concat(products.map((p) => ({ loc: `${origin}/products/${p.slug}`, lastmod: (p.updated_at || now.toISOString()).slice(0, 10) })));
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map((u) => `  <url><loc>${esc(u.loc)}</loc>${u.lastmod ? `<lastmod>${u.lastmod}</lastmod>` : ''}</url>`).join('\n')}\n</urlset>\n`;
+}
+export const truncateText = (s, n = 155) => { const t = String(s || '').replace(/\s+/g, ' ').trim(); return t.length <= n ? t : `${t.slice(0, n - 1).trimEnd()}…`; };

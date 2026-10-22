@@ -25,7 +25,7 @@ Deno.serve(async (req) => {
   });
   const admin = createClient(url, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
 
-  const { data: allowed } = await caller.rpc('has_permission', { p_key: 'staff.manage' });
+  const { data: allowed } = await caller.rpc('has_permission', { p_key: 'staff.manage' }); // also false when MFA is required but not satisfied
   if (allowed !== true) return json({ error: 'forbidden' }, 403);
 
   let body: { email?: string; full_name?: string; role_ids?: string[]; redirect_to?: string };
@@ -35,8 +35,14 @@ Deno.serve(async (req) => {
     return json({ error: 'invalid_body' }, 400);
   }
 
-  // Dry-run the permission rules BEFORE sending any e-mail is not possible without the user existing,
-  // so: invite first (idempotent for existing users), then register through the rule-enforcing RPC.
+  // Phase 3: dry-run the grant rules BEFORE any e-mail is sent (a staff.manage holder who may not grant
+  // these roles can no longer make the project mail arbitrary addresses). Needs migration 10.
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (body.role_ids.length > 10 || !body.role_ids.every((r) => typeof r === 'string' && uuid.test(r))) return json({ error: 'invalid_body' }, 400);
+  const { data: canGrant } = await caller.rpc('can_grant_roles', { p_role_ids: body.role_ids });
+  if (canGrant !== true) return json({ error: 'forbidden' }, 403);
+
+  // Invite first (idempotent for existing users), then register through the rule-enforcing RPC.
   const { error: inviteError } = await admin.auth.admin.inviteUserByEmail(email, { redirectTo: body.redirect_to });
   if (inviteError && !/already|registered|exists/i.test(inviteError.message)) return json({ error: 'invite_failed' }, 400);
 

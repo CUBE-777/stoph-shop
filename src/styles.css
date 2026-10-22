@@ -209,3 +209,16 @@ td input:not([type='checkbox']) { min-width: 7rem; }
 .history { list-style: none; padding: 0; } .history li { padding-block: var(--s2); border-block-end: 1px solid var(--border); }
 .bars { display: grid; gap: var(--s2); } .bar-row { display: grid; grid-template-columns: 7rem 1fr 6rem; gap: var(--s3); align-items: center; font-size: .9rem; }
 .bar-fill { height: .7rem; background: var(--red); border-radius: 99px; min-width: 2px; }
+
+/* ---- Phase 3 ---- */
+main:focus { outline: none; }                         /* programmatic focus after route change; no ring on the page container */
+.img-card, .card-media img { aspect-ratio: 1 / 1; object-fit: cover; width: 100%; height: auto; }
+.img-main { aspect-ratio: 1 / 1; object-fit: contain; width: 100%; height: auto; }
+.mfa-steps { padding-inline-start: 1.25rem; } .mfa-steps li { margin-block: var(--s2); }
+.mfa-qr { background: #fff; padding: var(--s2); border-radius: var(--r-md); }
+.pager { align-items: center; justify-content: center; margin-block: var(--s4); }
+.pill.st-ret-requested, .pill.st-ret-approved { border-color: var(--yellow); }
+.pill.st-ret-rejected { border-color: var(--bad); }
+.pill.st-ret-received, .pill.st-ret-closed { border-color: var(--border); }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; scroll-behavior: auto !important; } }
+@media (forced-colors: active) { .btn, .pill, .chip { border: 1px solid ButtonText; } }

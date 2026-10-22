@@ -41,7 +41,7 @@ export function ProductImage({ product, size = 'card' }) {
   const { t, loc } = useSettings();
   const img = product.product_images?.[0];
   if (!img) return <div className={`img-ph img-${size}`}>{t('product.noImage')}</div>;
-  return <img className={`img-${size}`} src={imageUrl(img.path)} alt={img.alt || loc(product, 'name')} loading="lazy" />;
+  return <img className={`img-${size}`} src={imageUrl(img.path)} alt={img.alt || loc(product, 'name')} loading="lazy" decoding="async" width="400" height="400" />;
 }
 
 export function Price({ product }) {

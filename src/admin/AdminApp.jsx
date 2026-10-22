@@ -2,8 +2,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, NavLink, Navigate, Route, Routes } from 'react-router-dom';
 import { useSettings } from '../context/SettingsContext.jsx';
 import { isConfigured } from '../lib/supabase.js';
-import { getSession, myPermissions, newOrdersFeed, onAuthChange, signOut } from '../services/admin.js';
+import { getSession, isOwner, mfaAal, mfaStatus, myPermissions, newOrdersFeed, onAuthChange, signOut } from '../services/admin.js';
+import { mfaGate } from '../lib/shop.js';
+import { MfaChallenge, MfaEnroll, Security } from './Mfa.jsx';
+import { Returns } from './Returns.jsx';
 import { Logo } from '../components/ui.jsx';
+import { usePageMeta } from '../lib/meta.js';
 import { AdminContext } from './context.js';
 import { Categories, Dashboard, Login, OrderDetail, Orders, Settings, Shipping } from './Pages.jsx';
 import { ProductForm, ProductList } from './Products.jsx';
@@ -51,8 +55,12 @@ function NewOrdersBanner() {
 
 export default function AdminApp() {
   const { t } = useSettings();
+  usePageMeta({ title: t('admin.title'), noindex: true });
   const [session, setSession] = useState(undefined); // undefined = still checking
   const [perms, setPerms] = useState(null);
+  const [gate, setGate] = useState(null);      // null = checking, 'ok' | 'challenge' | 'enroll'
+  const [owner, setOwner] = useState(false);
+  const [gateTick, setGateTick] = useState(0);
 
   useEffect(() => {
     if (!isConfigured) return undefined;
@@ -61,16 +69,29 @@ export default function AdminApp() {
     return () => sub.unsubscribe();
   }, []);
 
+  // MFA gate first (aal level + server policy), then permissions. The database enforces it again on every request.
+  useEffect(() => {
+    setGate(null);
+    if (!session) return;
+    Promise.all([mfaAal(), mfaStatus()]).then(([aal, st]) => setGate(mfaGate(aal, st))).catch(() => setGate('ok'));
+  }, [session, gateTick]);
+
   useEffect(() => {
     setPerms(null);
-    if (session) myPermissions().then(setPerms).catch(() => setPerms([]));
-  }, [session]);
+    if (session && gate === 'ok') {
+      myPermissions().then(setPerms).catch(() => setPerms([]));
+      isOwner().then(setOwner).catch(() => setOwner(false));
+    }
+  }, [session, gate]);
 
-  const ctx = useMemo(() => ({ perms: perms || [], can: (p) => (perms || []).includes(p), userId: session?.user?.id || null }), [perms, session]);
+  const ctx = useMemo(() => ({ perms: perms || [], can: (p) => (perms || []).includes(p), userId: session?.user?.id || null, isOwner: owner }), [perms, session, owner]);
 
   if (!isConfigured) return <main className="container main"><p className="state state-error">{t('setup.body')}</p></main>;
   if (session === undefined) return <p className="state" role="status">{t('admin.checking')}</p>;
   if (!session) return <Login />;
+  if (gate === null) return <p className="state" role="status">{t('admin.checking')}</p>;
+  if (gate === 'challenge') return <MfaChallenge onDone={() => setGateTick((x) => x + 1)} />;
+  if (gate === 'enroll') return <MfaEnroll forced onDone={() => setGateTick((x) => x + 1)} />;
   if (perms === null) return <p className="state" role="status">{t('admin.checking')}</p>;
   if (perms.length === 0) {
     return (
@@ -88,10 +109,12 @@ export default function AdminApp() {
     ['products', t('admin.nav.products'), can('products.view') || can('products.update') || can('products.create')],
     ['categories', t('admin.nav.categories'), can('categories.manage')],
     ['coupons', t('admin.nav.coupons'), can('coupons.manage')],
+    ['returns', t('admin.nav.returns'), can('orders.view')],
     ['reports', t('admin.nav.reports'), can('reports.view')],
     ['shipping', t('admin.nav.shipping'), can('shipping.manage')],
     ['staff', t('admin.nav.staff'), can('staff.manage')],
     ['audit', t('admin.nav.audit'), can('audit.view')],
+    ['security', t('mfa.title'), true],
     ['settings', t('admin.nav.settings'), true],
   ].filter((n) => n[2]);
 
@@ -117,6 +140,8 @@ export default function AdminApp() {
             </>}
             {can('categories.manage') && <Route path="categories" element={<Categories />} />}
             {can('orders.view') && <><Route path="orders" element={<Orders />} /><Route path="orders/:id" element={<OrderDetail />} /></>}
+            {can('orders.view') && <Route path="returns" element={<Returns />} />}
+            <Route path="security" element={<Security />} />
             {can('customers.view') && <><Route path="customers" element={<Customers />} /><Route path="customers/:id" element={<CustomerDetail />} /></>}
             {can('coupons.manage') && <Route path="coupons" element={<Coupons />} />}
             {can('reports.view') && <Route path="reports" element={<Reports />} />}

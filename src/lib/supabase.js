@@ -19,5 +19,6 @@ export function errorKey(error) {
   if (!error) return 'err.generic';
   const msg = String(error.message || '');
   if (/Failed to fetch|NetworkError|network/i.test(msg)) return 'err.network';
+  if (/invalid.*(totp|code)|invalid_?code|verification/i.test(msg) && /mfa|totp|code/i.test(msg)) return 'err.mfa_bad_code';
   return /^[a-z_]+$/.test(msg) ? `err.${msg}` : 'err.generic';
 }

@@ -8,9 +8,11 @@ import { errorKey } from '../lib/supabase.js';
 import { normalizeCoupon, normalizePhone, pickShippingFee, toLatinDigits, validateCheckout } from '../lib/shop.js';
 import { Field } from '../components/ui.jsx';
 import { CartLines } from './Cart.jsx';
+import { usePageMeta } from '../lib/meta.js';
 
 export default function Checkout() {
   const { t, money } = useSettings();
+  usePageMeta({ title: t('checkout.title'), noindex: true });
   const { items, subtotal, clear, refresh, hasUnavailable } = useCart();
   const navigate = useNavigate();
   const rates = useAsync(getShippingRates, []);

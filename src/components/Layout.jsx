@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Link, NavLink, Outlet } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useSettings } from '../context/SettingsContext.jsx';
 import { useCart } from '../context/CartContext.jsx';
 import { Logo } from './ui.jsx';
@@ -9,12 +9,17 @@ export default function Layout() {
   const { t, lang, setLang, theme, setTheme } = useSettings();
   const { count } = useCart();
   const [open, setOpen] = useState(false);
+  const { pathname } = useLocation();
+  const mainRef = useRef(null);
+  const first = useRef(true);
+  // Keyboard / screen-reader users: move focus to the content after navigating to another page.
+  useEffect(() => { if (first.current) { first.current = false; return; } mainRef.current?.focus({ preventScroll: false }); }, [pathname]);
   const close = () => setOpen(false);
   const nav = [['/', t('nav.home'), true], ['/products', t('nav.products')], ['/track', t('nav.track')], ['/delivery', t('nav.delivery')], ['/contact', t('nav.contact')]];
 
   return (
     <>
-      <a className="skip" href="#main">Skip to content</a>
+      <a className="skip" href="#main">{t('a11y.skip')}</a>
       <header className="site-header">
         <div className="container bar">
           <Link to="/" className="brand" onClick={close}><Logo /></Link>
@@ -31,7 +36,7 @@ export default function Layout() {
           </div>
         </div>
       </header>
-      <main id="main" className="container main">
+      <main id="main" ref={mainRef} tabIndex={-1} className="container main">
         {!isConfigured ? (
           <section className="state state-error" role="alert"><h1>{t('setup.title')}</h1><p>{t('setup.body')}</p></section>
         ) : <Outlet />}

@@ -14,3 +14,17 @@
     X-Content-Type-Options = "nosniff"
     X-Frame-Options = "DENY"
     Referrer-Policy = "strict-origin-when-cross-origin"
+    Strict-Transport-Security = "max-age=31536000"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=(), payment=()"
+    Cross-Origin-Opener-Policy = "same-origin"
+    # Phase 3: REPORT-ONLY first. It was not tested in a browser here. Deploy, open the shop + /admin + a product
+    # + checkout with the browser console open; if there are no "Content-Security-Policy-Report-Only" violations,
+    # rename this header to "Content-Security-Policy" to enforce it. (If you use a custom Supabase domain or
+    # VITE_LOGO_URL on another host, add it to img-src / connect-src first.)
+    Content-Security-Policy-Report-Only = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https://*.supabase.co; connect-src 'self' https://*.supabase.co wss://*.supabase.co; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
+
+# Vite fingerprints files in /assets: cache them for a year.
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"

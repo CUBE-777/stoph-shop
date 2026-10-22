@@ -6,6 +6,7 @@ import { useAsync } from '../lib/hooks.js';
 import { getProductBySlug } from '../services/catalog.js';
 import { Async, Price } from '../components/ui.jsx';
 import { imageUrl } from '../lib/supabase.js';
+import { usePageMeta } from '../lib/meta.js';
 import { MAX_QTY, productAvailability, unitPrice } from '../lib/shop.js';
 
 export default function ProductDetail() {
@@ -28,6 +29,16 @@ function Detail({ product: p }) {
   const variant = p.product_variants.find((v) => v.id === variantId);
   const canAdd = available && (!hasVariants || (variant && variant.is_available));
   const images = p.product_images;
+  usePageMeta({
+    title: loc(p, 'name'), description: loc(p, 'description') || loc(p, 'name'), path: `/products/${p.slug}`,
+    image: images[0] ? imageUrl(images[0].path) : null,
+    jsonLd: {
+      '@context': 'https://schema.org', '@type': 'Product', name: loc(p, 'name'), description: loc(p, 'description') || undefined,
+      image: images.map((im) => imageUrl(im.path)), sku: p.slug,
+      offers: { '@type': 'Offer', priceCurrency: 'MAD', price: String(unitPrice(p)), url: `${window.location.origin}/products/${p.slug}`,
+        availability: available ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock' },
+    },
+  });
 
   const onAdd = () => {
     if (!canAdd) return;
@@ -44,13 +55,13 @@ function Detail({ product: p }) {
     <article className="detail">
       <div className="gallery">
         {images.length > 0
-          ? <img className="img-main" src={imageUrl(images[img]?.path)} alt={images[img]?.alt || loc(p, 'name')} />
+          ? <img className="img-main" src={imageUrl(images[img]?.path)} alt={images[img]?.alt || loc(p, 'name')} width="800" height="800" decoding="async" fetchpriority="high" />
           : <div className="img-ph img-main">{t('product.noImage')}</div>}
         {images.length > 1 && (
           <ul className="thumbs">
             {images.map((im, i) => (
               <li key={im.path}><button className={i === img ? 'active' : ''} onClick={() => setImg(i)} aria-label={`${i + 1}`}>
-                <img src={imageUrl(im.path)} alt="" loading="lazy" /></button></li>
+                <img src={imageUrl(im.path)} alt="" loading="lazy" decoding="async" width="80" height="80" /></button></li>
             ))}
           </ul>
         )}

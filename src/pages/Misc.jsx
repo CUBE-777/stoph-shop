@@ -1,8 +1,10 @@
 import { Link, Navigate, useLocation } from 'react-router-dom';
 import { useSettings } from '../context/SettingsContext.jsx';
+import { usePageMeta } from '../lib/meta.js';
 
 export function OrderSuccess() {
   const { t, money } = useSettings();
+  usePageMeta({ title: t('success.title'), noindex: true });
   const { state } = useLocation();
   if (!state?.orderNumber) return <Navigate to="/" replace />;
   return (
@@ -25,6 +27,7 @@ export function OrderSuccess() {
 
 export function Info() {
   const { t } = useSettings();
+  usePageMeta({ title: t('info.title'), description: t('meta.delivery'), path: '/delivery' });
   return (
     <article className="prose">
       <h1>{t('info.title')}</h1>
@@ -37,6 +40,7 @@ export function Info() {
 
 export function Contact() {
   const { t } = useSettings();
+  usePageMeta({ title: t('contact.title'), description: t('meta.contact'), path: '/contact' });
   const phone = import.meta.env.VITE_CONTACT_PHONE;
   const wa = import.meta.env.VITE_CONTACT_WHATSAPP;
   const email = import.meta.env.VITE_CONTACT_EMAIL;
@@ -56,5 +60,6 @@ export function Contact() {
 
 export function NotFound() {
   const { t } = useSettings();
+  usePageMeta({ title: t('notfound.title'), noindex: true });
   return <section className="state"><h1>{t('notfound.title')}</h1><Link className="btn" to="/">{t('notfound.home')}</Link></section>;
 }

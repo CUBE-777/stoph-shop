@@ -1,5 +1,6 @@
 // All UI strings. Keys must exist in BOTH languages.
 import { phase2 } from './phase2.js';
+import { phase3 } from './phase3.js';
 
 const base = {
   ar: {
@@ -166,6 +167,6 @@ const base = {
 };
 
 export const dictionary = {
-  ar: { ...base.ar, ...phase2.ar },
-  fr: { ...base.fr, ...phase2.fr },
+  ar: { ...base.ar, ...phase2.ar, ...phase3.ar },
+  fr: { ...base.fr, ...phase2.fr, ...phase3.fr },
 };
