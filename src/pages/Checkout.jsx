@@ -1,11 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useSettings } from '../context/SettingsContext.jsx';
 import { useCart } from '../context/CartContext.jsx';
 import { useAsync } from '../lib/hooks.js';
 import { getShippingRates, placeOrder, quoteOrder } from '../services/catalog.js';
 import { errorKey } from '../lib/supabase.js';
-import { normalizeCoupon, normalizePhone, pickShippingFee, toLatinDigits, validateCheckout } from '../lib/shop.js';
+import { checkoutSignature, clearCheckoutToken, getCheckoutToken, normalizeCoupon, normalizePhone, pickShippingFee, toLatinDigits, validateCheckout } from '../lib/shop.js';
 import { Field } from '../components/ui.jsx';
 import { CartLines } from './Cart.jsx';
 import { usePageMeta } from '../lib/meta.js';
@@ -20,6 +20,7 @@ export default function Checkout() {
   const [errors, setErrors] = useState({});
   const [submitError, setSubmitError] = useState(null);
   const [busy, setBusy] = useState(false);
+  const lock = useRef(false);                          // synchronous guard: a double tap can fire twice before React re-renders
   const [couponInput, setCouponInput] = useState('');
   const [coupon, setCoupon] = useState('');            // applied coupon code
   const [couponMsg, setCouponMsg] = useState(null);
@@ -57,15 +58,20 @@ export default function Checkout() {
 
   const submit = async (e) => {
     e.preventDefault();
-    if (busy) return;
+    if (busy || lock.current) return;
     const clean = { ...form, phone: toLatinDigits(form.phone) };
     const errs = validateCheckout(clean);
     setErrors(errs);
     setSubmitError(null);
     if (Object.keys(errs).length) return;
+    lock.current = true;
     setBusy(true);
     try {
-      const res = await placeOrder({ ...clean, phone: normalizePhone(clean.phone) }, items, coupon);
+      const data = { ...clean, phone: normalizePhone(clean.phone) };
+      // Same cart + same details => same token, so a retry after a timeout returns the existing order (server-side, migration 12).
+      const token = getCheckoutToken(window.sessionStorage, checkoutSignature(items, data), () => crypto.randomUUID());
+      const res = await placeOrder(data, items, coupon, token);
+      clearCheckoutToken(window.sessionStorage);
       clear();
       navigate('/order-success', { replace: true, state: { orderNumber: res.order_number, total: res.total, trackingCode: res.tracking_code } });
     } catch (err) {
@@ -73,7 +79,7 @@ export default function Checkout() {
       setSubmitError(key);
       if (/unavailable|invalid_variant|variant_required/.test(key)) refresh().catch(() => {});
       if (/coupon/.test(key)) setCoupon('');
-    } finally { setBusy(false); }
+    } finally { setBusy(false); lock.current = false; }
   };
 
   return (

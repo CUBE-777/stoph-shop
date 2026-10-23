@@ -67,7 +67,11 @@ export function setQty(items, key, qty) {
   return items.map((x) => (lineKey(x.productId, x.variantId) === key ? { ...x, qty: q } : x));
 }
 export const removeLine = (items, key) => items.filter((x) => lineKey(x.productId, x.variantId) !== key);
-export const cartSubtotal = (items) => items.reduce((s, x) => s + Number(x.price) * x.qty, 0);
+// Money is added in integer minor units (centimes) so 19.99 x 3 is exactly 59.97, never 59.97000000000001.
+export const toMinor = (x) => Math.round((Number(x) || 0) * 100);
+export const fromMinor = (m) => m / 100;
+export const lineTotal = (price, qty) => fromMinor(toMinor(price) * qty);
+export const cartSubtotal = (items) => fromMinor(items.reduce((s, x) => s + toMinor(x.price) * x.qty, 0));
 export const cartCount = (items) => items.reduce((s, x) => s + x.qty, 0);
 
 // Preview only — the server computes the real fee.
@@ -174,3 +178,119 @@ export function sitemapXml(origin, products, now = new Date()) {
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map((u) => `  <url><loc>${esc(u.loc)}</loc>${u.lastmod ? `<lastmod>${u.lastmod}</lastmod>` : ''}</url>`).join('\n')}\n</urlset>\n`;
 }
 export const truncateText = (s, n = 155) => { const t = String(s || '').replace(/\s+/g, ' ').trim(); return t.length <= n ? t : `${t.slice(0, n - 1).trimEnd()}…`; };
+
+// ---------------------------------------------------------------------------------------------------------
+// Storefront upgrade helpers (pure, unit-tested)
+// ---------------------------------------------------------------------------------------------------------
+
+// Cart restored from localStorage: drop anything malformed, clamp quantities, never trust stored numbers blindly.
+export function sanitizeCart(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((x) => x && typeof x.productId === 'string' && x.productId && Number.isFinite(Number(x.price)) && Number(x.price) >= 0 && Number.isFinite(Number(x.qty)))
+    .map((x) => ({ ...x, price: Number(x.price), qty: Math.max(1, Math.min(MAX_QTY, Math.floor(Number(x.qty)) || 1)) }));
+}
+
+// ---- promotional carousel ----
+export const CAROUSEL_DEFAULTS = { autoplay: true, interval_seconds: 5, transition: 'slide' };
+export const clampInterval = (s) => Math.max(3, Math.min(15, Math.round(Number(s)) || 5));
+export const carouselSettings = (row) => ({
+  autoplay: row?.autoplay !== false,
+  interval_seconds: clampInterval(row?.interval_seconds),
+  transition: row?.transition === 'fade' ? 'fade' : 'slide',
+});
+// Mirror of the RLS rule (enabled AND inside the schedule). The database is the real gate; this is for previews/tests.
+export function bannerEligible(b, now = new Date()) {
+  if (!b || !b.is_active) return false;
+  if (b.starts_at && new Date(b.starts_at) > now) return false;
+  if (b.ends_at && new Date(b.ends_at) <= now) return false;
+  return true;
+}
+export const sortBanners = (list) => [...list].sort((a, b) => (a.sort_order - b.sort_order) || String(a.created_at || '').localeCompare(String(b.created_at || '')));
+export const slideIndex = (i, len, dir) => (len <= 0 ? 0 : (((i + dir) % len) + len) % len);
+// Horizontal swipe -> -1 (next) / +1 (previous) / 0 (ignore). dir: 'ltr' | 'rtl'. Vertical scrolls are ignored.
+export function swipeDirection(dx, dy, rtl = false, min = 40) {
+  if (Math.abs(dx) < min || Math.abs(dx) < Math.abs(dy) * 1.2) return 0;
+  const forward = rtl ? dx > 0 : dx < 0;
+  return forward ? 1 : -1;
+}
+// A banner destination as an in-app route or an https URL. Anything else (javascript:, data:, //host) yields null.
+export function isSafeInternalPath(p) { return typeof p === 'string' && /^\/([^/\s][^\s]*)?$/.test(p); }
+export function isSafeHttpsUrl(u) { try { const x = new URL(u); return x.protocol === 'https:' && !!x.hostname; } catch { return false; } }
+export function resolveBannerLink(b) {
+  if (!b) return null;
+  if (b.link_type === 'product') return b.products?.slug ? { to: `/products/${b.products.slug}` } : null;
+  if (b.link_type === 'category') return b.categories?.slug ? { to: `/products?category=${encodeURIComponent(b.categories.slug)}` } : null;
+  if (b.link_type === 'page') return ['/', '/products', '/track', '/delivery', '/contact'].includes(b.page_path) ? { to: b.page_path } : null;
+  if (b.link_type === 'url') {
+    if (isSafeInternalPath(b.link_url)) return { to: b.link_url };
+    if (isSafeHttpsUrl(b.link_url)) return { href: b.link_url };
+  }
+  return null;
+}
+export const bannerText = (b, field, lang) => (lang === 'fr' ? b[`${field}_fr`] || b[`${field}_ar`] : b[`${field}_ar`] || b[`${field}_fr`]) || '';
+
+// ---- favorites (stored in this browser only; no customer accounts exist) ----
+export const toggleFavorite = (ids, id) => (ids.includes(id) ? ids.filter((x) => x !== id) : [id, ...ids].slice(0, 200));
+export const sanitizeFavorites = (raw) => (Array.isArray(raw) ? [...new Set(raw.filter((x) => typeof x === 'string' && /^[0-9a-f-]{36}$/i.test(x)))].slice(0, 200) : []);
+
+// ---- duplicate-order protection ----
+// One random token per distinct checkout attempt. Same cart + same customer data => same token, so a retry after
+// a timeout (or a double tap) maps to the same order on the server. Any change to the cart/data => new token.
+export function checkoutSignature(items, form) {
+  return JSON.stringify([items.map((i) => [i.productId, i.variantId || null, i.qty]).sort(), form.full_name?.trim(), form.phone, form.city?.trim(), form.address?.trim()]);
+}
+export function getCheckoutToken(store, signature, makeId) {
+  try {
+    const cur = JSON.parse(store.getItem('stoph.checkout.token') || 'null');
+    if (cur && cur.sig === signature && cur.token) return cur.token;
+  } catch { /* fall through */ }
+  const token = makeId();
+  try { store.setItem('stoph.checkout.token', JSON.stringify({ sig: signature, token })); } catch { /* private mode: token still works for this attempt */ }
+  return token;
+}
+export const clearCheckoutToken = (store) => { try { store.removeItem('stoph.checkout.token'); } catch { /* ignore */ } };
+
+// ---- admin banners ----
+export const BANNER_SIZES = { desktop: '1600 × 600 px (8:3)', mobile: '900 × 675 px (4:3)' };
+export function bannerStatus(b, now = new Date()) {
+  if (!b.is_active) return 'disabled';
+  if (b.starts_at && new Date(b.starts_at) > now) return 'scheduled';
+  if (b.ends_at && new Date(b.ends_at) <= now) return 'expired';
+  return 'live';
+}
+// <input type="datetime-local"> works in the admin's local time; the database stores an absolute instant (timestamptz).
+const p2 = (n) => String(n).padStart(2, '0');
+export function toLocalInput(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? '' : `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}T${p2(d.getHours())}:${p2(d.getMinutes())}`;
+}
+export function fromLocalInput(v) {
+  if (!v) return null;
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+// Returns { field: errorKey } — empty object means valid. `hasImage` = a stored or newly chosen desktop image exists.
+export function validateBanner(b, { hasImage }) {
+  const e = {};
+  if (!String(b.title_ar || '').trim() || String(b.title_ar).length > 120) e.title_ar = 'err.invalid_title';
+  if (!String(b.title_fr || '').trim() || String(b.title_fr).length > 120) e.title_fr = 'err.invalid_title';
+  if (String(b.subtitle_ar || '').length > 240) e.subtitle_ar = 'err.invalid_notes';
+  if (String(b.subtitle_fr || '').length > 240) e.subtitle_fr = 'err.invalid_notes';
+  if (String(b.button_ar || '').length > 40) e.button_ar = 'err.invalid_notes';
+  if (String(b.button_fr || '').length > 40) e.button_fr = 'err.invalid_notes';
+  if (b.link_type === 'product' && !b.product_id) e.product_id = 'err.banner_pick_product';
+  if (b.link_type === 'category' && !b.category_id) e.category_id = 'err.banner_pick_category';
+  if (b.link_type === 'page' && !['/', '/products', '/track', '/delivery', '/contact'].includes(b.page_path)) e.page_path = 'err.banner_pick_page';
+  if (b.link_type === 'url' && !(isSafeInternalPath(b.link_url) || isSafeHttpsUrl(b.link_url))) e.link_url = 'err.banner_bad_url';
+  if (b.starts_at && b.ends_at && new Date(b.ends_at) <= new Date(b.starts_at)) e.ends_at = 'err.banner_dates';
+  if (b.is_active && !hasImage) e.image = 'err.banner_need_image';
+  return e;
+}
+export function validateImageFile(file, maxBytes = 8 * 1024 * 1024) {
+  if (!file) return null;
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) return 'err.invalid_image';
+  if (file.size > maxBytes) return 'err.image_too_large';
+  return null;
+}

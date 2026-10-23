@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { addToCart, cartCount, cartSubtotal, removeLine, setQty, unitPrice } from '../lib/shop.js';
+import { addToCart, cartCount, cartSubtotal, removeLine, sanitizeCart, setQty, unitPrice } from '../lib/shop.js';
 import { fetchProductsByIds } from '../services/catalog.js';
 
 const Ctx = createContext(null);
@@ -7,8 +7,7 @@ const KEY = 'stoph.cart.v1';
 
 function load() {
   try {
-    const raw = JSON.parse(localStorage.getItem(KEY) || '[]');
-    return Array.isArray(raw) ? raw.filter((x) => x && x.productId && Number.isInteger(x.qty)) : [];
+    return sanitizeCart(JSON.parse(localStorage.getItem(KEY) || '[]'));   // malformed / tampered entries are dropped, qty clamped
   } catch { return []; }
 }
 
@@ -16,6 +15,15 @@ export function CartProvider({ children }) {
   const [items, setItems] = useState(load);
   const [priceChanged, setPriceChanged] = useState(false);
   useEffect(() => { try { localStorage.setItem(KEY, JSON.stringify(items)); } catch { /* ignore */ } }, [items]);
+  // Another tab changed the cart: adopt it, so the header counter and the cart page never disagree across tabs.
+  useEffect(() => {
+    const onStorage = (e) => {
+      if (e.key !== KEY) return;
+      try { setItems(sanitizeCart(JSON.parse(e.newValue || '[]'))); } catch { /* ignore */ }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
 
   const add = useCallback((item) => setItems((c) => addToCart(c, item)), []);
   const update = useCallback((key, qty) => setItems((c) => setQty(c, key, qty)), []);

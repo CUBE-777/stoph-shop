@@ -3,8 +3,8 @@ import { Link, useParams } from 'react-router-dom';
 import { useSettings } from '../context/SettingsContext.jsx';
 import { useCart } from '../context/CartContext.jsx';
 import { useAsync } from '../lib/hooks.js';
-import { getProductBySlug } from '../services/catalog.js';
-import { Async, Price } from '../components/ui.jsx';
+import { getProductBySlug, listRelated } from '../services/catalog.js';
+import { Async, FavoriteButton, Price, ProductCard } from '../components/ui.jsx';
 import { imageUrl } from '../lib/supabase.js';
 import { usePageMeta } from '../lib/meta.js';
 import { MAX_QTY, productAvailability, unitPrice } from '../lib/shop.js';
@@ -52,6 +52,7 @@ function Detail({ product: p }) {
   };
 
   return (
+    <>
     <article className="detail">
       <div className="gallery">
         {images.length > 0
@@ -85,15 +86,54 @@ function Detail({ product: p }) {
           </fieldset>
         )}
 
-        <div className="buy">
+        <div className="buy" id="buy-box">
           <div className="field narrow"><label htmlFor="qty">{t('product.qty')}</label>
             <input id="qty" type="number" min="1" max={MAX_QTY} value={qty}
               onChange={(e) => setQty(Math.max(1, Math.min(MAX_QTY, Math.floor(Number(e.target.value)) || 1)))} /></div>
           <button className="btn btn-primary" disabled={!canAdd} onClick={onAdd}>{t('product.add')}</button>
+          <FavoriteButton product={p} className="fav-inline" />
         </div>
         {available && hasVariants && !variant && <p className="hint">{t('product.pickVariant')}</p>}
         {added && <p className="ok" role="status">{t('product.added')} — <Link to="/cart">{t('product.viewCart')}</Link></p>}
       </div>
     </article>
+    <StickyBuy p={p} canAdd={canAdd} needVariant={hasVariants && !variant} onAdd={onAdd} />
+    <Related product={p} />
+    </>
+  );
+}
+
+// Same-category products (never the current one). Hidden when there are none or the request fails.
+function Related({ product }) {
+  const { t } = useSettings();
+  const state = useAsync(() => listRelated(product, 4), [product.id]);
+  if (!state.data || state.data.length === 0) return null;
+  return (
+    <section aria-labelledby="h-related">
+      <h2 id="h-related">{t('product.related')}</h2>
+      <div className="grid">{state.data.map((x) => <ProductCard key={x.id} product={x} />)}</div>
+    </section>
+  );
+}
+
+// Phones: while the real "add to cart" box is off-screen, keep the main action reachable above the bottom navigation.
+function StickyBuy({ p, canAdd, needVariant, onAdd }) {
+  const { t, loc, money } = useSettings();
+  const [show, setShow] = useState(false);
+  useEffect(() => {
+    const el = document.getElementById('buy-box');
+    if (!el || !('IntersectionObserver' in window)) return undefined;
+    const io = new IntersectionObserver(([e]) => setShow(!e.isIntersecting), { threshold: 0 });
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+  useEffect(() => { document.body.classList.toggle('has-sticky-buy', show); return () => document.body.classList.remove('has-sticky-buy'); }, [show]);
+  if (!show) return null;
+  const go = needVariant ? () => document.querySelector('.variants')?.scrollIntoView({ block: 'center', behavior: 'smooth' }) : onAdd;
+  return (
+    <div className="sticky-buy" role="region" aria-label={t('product.add')}>
+      <div className="sb-info"><strong className="sb-name">{loc(p, 'name')}</strong><span className="sb-price">{money(unitPrice(p))}</span></div>
+      <button type="button" className="btn btn-primary" disabled={!needVariant && !canAdd} onClick={go}>{needVariant ? t('product.choose') : t('product.add')}</button>
+    </div>
   );
 }

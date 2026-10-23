@@ -6,6 +6,7 @@ import { getSession, isOwner, mfaAal, mfaStatus, myPermissions, newOrdersFeed, o
 import { mfaGate } from '../lib/shop.js';
 import { MfaChallenge, MfaEnroll, Security } from './Mfa.jsx';
 import { Returns } from './Returns.jsx';
+import { Banners } from './Banners.jsx';
 import { Logo } from '../components/ui.jsx';
 import { usePageMeta } from '../lib/meta.js';
 import { AdminContext } from './context.js';
@@ -110,6 +111,7 @@ export default function AdminApp() {
     ['categories', t('admin.nav.categories'), can('categories.manage')],
     ['coupons', t('admin.nav.coupons'), can('coupons.manage')],
     ['returns', t('admin.nav.returns'), can('orders.view')],
+    ['banners', t('banners.title'), can('banners.manage')],
     ['reports', t('admin.nav.reports'), can('reports.view')],
     ['shipping', t('admin.nav.shipping'), can('shipping.manage')],
     ['staff', t('admin.nav.staff'), can('staff.manage')],
@@ -141,6 +143,7 @@ export default function AdminApp() {
             {can('categories.manage') && <Route path="categories" element={<Categories />} />}
             {can('orders.view') && <><Route path="orders" element={<Orders />} /><Route path="orders/:id" element={<OrderDetail />} /></>}
             {can('orders.view') && <Route path="returns" element={<Returns />} />}
+            {can('banners.manage') && <Route path="banners" element={<Banners />} />}
             <Route path="security" element={<Security />} />
             {can('customers.view') && <><Route path="customers" element={<Customers />} /><Route path="customers/:id" element={<CustomerDetail />} /></>}
             {can('coupons.manage') && <Route path="coupons" element={<Coupons />} />}

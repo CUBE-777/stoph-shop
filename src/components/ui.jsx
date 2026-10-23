@@ -1,13 +1,17 @@
 import { Link } from 'react-router-dom';
+import { useFavorites } from '../context/FavoritesContext.jsx';
+import { IconHeart } from './Icons.jsx';
 import { useSettings } from '../context/SettingsContext.jsx';
 import { errorKey, imageUrl } from '../lib/supabase.js';
 import { discountPercent, isOnSale, productAvailability, unitPrice } from '../lib/shop.js';
 
-// Temporary wordmark. Set VITE_LOGO_URL (or edit this one component) to switch to the final logo.
-export function Logo() {
-  const logo = import.meta.env.VITE_LOGO_URL;
-  if (logo) return <img className="logo-img" src={logo} alt="Stoph Shop" height="32" />;
-  return <span className="wordmark" aria-label="Stoph Shop">Stoph<span className="wordmark-dot" aria-hidden="true" />Shop</span>;
+// Official STOPH SHOP logo (wordmark crop of the supplied artwork, untouched colours). VITE_LOGO_URL still overrides it.
+// The header/footer are always dark, matching the logo's own black background, in both themes.
+export function Logo({ size = 'header' }) {
+  const custom = import.meta.env.VITE_LOGO_URL;
+  if (custom) return <img className="logo-img" src={custom} alt="Stoph Shop" height="32" />;
+  if (size === 'footer') return <img className="logo-full" src="/brand/logo-full.png" alt="Stoph Shop — Your online store" width="160" height="160" loading="lazy" decoding="async" />;
+  return <img className="logo-img" src="/brand/logo-wordmark.png" alt="Stoph Shop" width="593" height="96" decoding="async" />;
 }
 
 // Loading / error / empty wrapper for async data.
@@ -58,18 +62,32 @@ export function Price({ product }) {
   );
 }
 
+export function FavoriteButton({ product, className = '' }) {
+  const { t, loc } = useSettings();
+  const fav = useFavorites();
+  const on = fav.has(product.id);
+  return (
+    <button type="button" className={`fav-btn ${className}${on ? ' on' : ''}`} aria-pressed={on}
+      aria-label={`${on ? t('fav.remove') : t('fav.add')}: ${loc(product, 'name')}`} onClick={() => fav.toggle(product.id)}>
+      <IconHeart filled={on} width={20} height={20} />
+    </button>
+  );
+}
+
 export function ProductCard({ product }) {
   const { loc, t } = useSettings();
   const { available } = productAvailability(product);
   return (
     <article className={`card${available ? '' : ' card-off'}`}>
-      <Link to={`/products/${product.slug}`} className="card-link">
-        <div className="card-media">
+      <div className="card-media">
+        <Link to={`/products/${product.slug}`} className="card-link" tabIndex={-1} aria-hidden="true">
           <ProductImage product={product} />
-          {!available && <span className="badge badge-off">{t('product.unavailable')}</span>}
-        </div>
-        <h3 className="card-title">{loc(product, 'name')}</h3>
-      </Link>
+        </Link>
+        {!available && <span className="badge badge-off">{t('product.unavailable')}</span>}
+        {available && isOnSale(product) && <span className="badge badge-corner">−{discountPercent(product)}%</span>}
+        <FavoriteButton product={product} />
+      </div>
+      <Link to={`/products/${product.slug}`} className="card-link"><h3 className="card-title">{loc(product, 'name')}</h3></Link>
       <Price product={product} />
     </article>
   );

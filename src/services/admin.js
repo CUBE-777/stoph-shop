@@ -206,3 +206,86 @@ export async function mfaVerify(factorId, code) {
 export const mfaUnenroll = (factorId) => supabase.auth.mfa.unenroll({ factorId }).then(ok);   // needs an aal2 session
 export const setMfaEnforcement = (on) => supabase.rpc('set_mfa_enforcement', { p_on: on }).then(ok);
 export const setRoleRequiresMfa = (roleId, on) => supabase.rpc('set_role_requires_mfa', { p_role_id: roleId, p_on: on }).then(ok);
+
+// ---- Storefront: promotional banners & carousel settings (migration 12). RLS + banners.manage guard every write. ----
+import { BANNER_BUCKET, bannerImageUrl } from '../lib/supabase.js';
+const BANNER_COLS = '*, products(name_ar, name_fr, slug), categories(name_ar, name_fr, slug)';
+export const listBannersAdmin = () => supabase.from('banners').select(BANNER_COLS).order('sort_order').order('created_at').then(ok);
+export const listProductsLite = () => supabase.from('products').select('id, slug, name_ar, name_fr').order('name_fr').limit(500).then(ok);
+export const getCarouselSettingsAdmin = () => supabase.from('carousel_settings').select('autoplay, interval_seconds, transition').eq('id', 1).maybeSingle().then(ok);
+export const saveCarouselSettings = (s) => supabase.from('carousel_settings')
+  .update({ autoplay: !!s.autoplay, interval_seconds: Math.max(3, Math.min(15, Math.round(Number(s.interval_seconds)) || 5)), transition: s.transition === 'fade' ? 'fade' : 'slide' })
+  .eq('id', 1).select().then(ok);
+
+// Upload with REAL progress (XMLHttpRequest exposes upload progress; fetch/supabase-js do not). The bucket and its policies
+// only accept "<uuid>.<jpg|png|webp>" from users holding banners.manage, so a forged call from the console is rejected too.
+export async function uploadBannerImage(file, onProgress) {
+  const prepared = await prepareImage(file, { max: 1920, quality: 0.85 });
+  const ext = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }[prepared.type];
+  if (!ext) throw new Error('invalid_image');
+  if (prepared.size > 3 * 1024 * 1024) throw new Error('image_too_large');
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('forbidden');
+  const path = `${crypto.randomUUID()}.${ext}`;
+  await new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/${BANNER_BUCKET}/${path}`);
+    xhr.setRequestHeader('Authorization', `Bearer ${session.access_token}`);
+    xhr.setRequestHeader('apikey', import.meta.env.VITE_SUPABASE_ANON_KEY);
+    xhr.setRequestHeader('Content-Type', prepared.type);
+    xhr.setRequestHeader('Cache-Control', 'max-age=31536000');
+    xhr.setRequestHeader('x-upsert', 'false');
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress?.(Math.round((e.loaded / e.total) * 100)); };
+    xhr.onload = () => (xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(xhr.status === 401 || xhr.status === 403 ? 'forbidden' : 'upload_failed')));
+    xhr.onerror = () => reject(new Error('network'));
+    xhr.send(prepared);
+  });
+  return path;
+}
+const removeBannerFiles = (paths) => { const p = paths.filter(Boolean); return p.length ? supabase.storage.from(BANNER_BUCKET).remove(p).catch(() => {}) : Promise.resolve(); };
+
+// banner: form values; files: { desktop?: File, mobile?: File }; removeMobile: boolean. Returns the saved row.
+export async function saveBanner(banner, files = {}, { removeMobile = false, onProgress } = {}) {
+  const prev = banner.id ? { image: banner.image_path, mobile: banner.mobile_image_path } : {};
+  const row = {
+    title_ar: banner.title_ar.trim(), title_fr: banner.title_fr.trim(),
+    subtitle_ar: banner.subtitle_ar?.trim() || null, subtitle_fr: banner.subtitle_fr?.trim() || null,
+    button_ar: banner.button_ar?.trim() || null, button_fr: banner.button_fr?.trim() || null,
+    link_type: banner.link_type,
+    product_id: banner.link_type === 'product' ? banner.product_id || null : null,
+    category_id: banner.link_type === 'category' ? banner.category_id || null : null,
+    page_path: banner.link_type === 'page' ? banner.page_path || null : null,
+    link_url: banner.link_type === 'url' ? banner.link_url?.trim() || null : null,
+    image_alt_ar: banner.image_alt_ar?.trim() || null, image_alt_fr: banner.image_alt_fr?.trim() || null,
+    starts_at: banner.starts_at || null, ends_at: banner.ends_at || null,
+    is_active: !!banner.is_active, sort_order: Number.isFinite(Number(banner.sort_order)) ? Number(banner.sort_order) : 0,
+    image_path: banner.image_path || null, mobile_image_path: removeMobile ? null : banner.mobile_image_path || null,
+  };
+  const uploaded = [];
+  try {
+    if (files.desktop) { row.image_path = await uploadBannerImage(files.desktop, (p) => onProgress?.('desktop', p)); uploaded.push(row.image_path); }
+    if (files.mobile) { row.mobile_image_path = await uploadBannerImage(files.mobile, (p) => onProgress?.('mobile', p)); uploaded.push(row.mobile_image_path); }
+    const q = banner.id ? supabase.from('banners').update(row).eq('id', banner.id) : supabase.from('banners').insert(row);
+    const saved = await q.select(BANNER_COLS).single().then(ok);
+    await removeBannerFiles([files.desktop ? prev.image : null, files.mobile || removeMobile ? prev.mobile : null]);   // old files only after the row points to the new ones
+    return saved;
+  } catch (e) {
+    await removeBannerFiles(uploaded);                                    // do not leave orphan uploads behind
+    throw e;
+  }
+}
+export const setBannerActive = (id, on) => supabase.from('banners').update({ is_active: !!on }).eq('id', id).select().then(ok);
+export async function moveBanner(list, id, dir) {
+  const i = list.findIndex((b) => b.id === id); const j = i + dir;
+  if (i < 0 || j < 0 || j >= list.length) return;
+  // Re-number everything 10,20,30… in the new order (avoids duplicate sort_order values breaking the swap).
+  const order = [...list]; [order[i], order[j]] = [order[j], order[i]];
+  for (let k = 0; k < order.length; k += 1) {
+    if (order[k].sort_order !== (k + 1) * 10) await supabase.from('banners').update({ sort_order: (k + 1) * 10 }).eq('id', order[k].id).then(ok);
+  }
+}
+export async function deleteBanner(banner) {
+  await supabase.from('banners').delete().eq('id', banner.id).then(ok);
+  await removeBannerFiles([banner.image_path, banner.mobile_image_path]);
+}
+export { bannerImageUrl };

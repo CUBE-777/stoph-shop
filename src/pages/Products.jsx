@@ -15,6 +15,9 @@ export default function Products() {
   const [extra, setExtra] = useState({ items: [], page: 0, done: false, busy: false, error: null });
   const cats = useAsync(listCategories, []);
 
+  useEffect(() => { setQ(params.get('q') ?? ''); }, [params]);   // header search / links change ?q while this page stays mounted
+  const [wide, setWide] = useState(() => typeof window !== 'undefined' && window.matchMedia?.('(min-width: 800px)').matches);
+  useEffect(() => { const m = window.matchMedia?.('(min-width: 800px)'); if (!m) return undefined; const on = () => setWide(m.matches); m.addEventListener?.('change', on); return () => m.removeEventListener?.('change', on); }, []);
   const slug = get('category');
   const categoryId = cats.data?.find((c) => c.slug === slug)?.id;
   const filters = { search: get('q'), sort: get('sort', 'new'), minPrice: get('min'), maxPrice: get('max') };
@@ -41,11 +44,7 @@ export default function Products() {
   return (
     <>
       <h1>{t('products.title')}</h1>
-      <form className="filters" onSubmit={submit} role="search">
-        <div className="field grow">
-          <label htmlFor="q">{t('products.search')}</label>
-          <input id="q" type="search" value={q} onChange={(e) => setQ(e.target.value)} maxLength={60} />
-        </div>
+      <form className="filters products-filters" onSubmit={submit} role="search">
         <div className="field">
           <label htmlFor="cat">{t('products.category')}</label>
           <select id="cat" value={slug} onChange={(e) => setParam('category', e.target.value)}>
@@ -61,12 +60,21 @@ export default function Products() {
             <option value="priceDesc">{t('products.sort.priceDesc')}</option>
           </select>
         </div>
-        <div className="field narrow"><label htmlFor="min">{t('products.minPrice')}</label>
-          <input id="min" type="number" min="0" inputMode="numeric" value={get('min')} onChange={(e) => setParam('min', e.target.value)} /></div>
-        <div className="field narrow"><label htmlFor="max">{t('products.maxPrice')}</label>
-          <input id="max" type="number" min="0" inputMode="numeric" value={get('max')} onChange={(e) => setParam('max', e.target.value)} /></div>
-        <button className="btn btn-primary" type="submit">{t('common.search')}</button>
-        <button className="btn btn-ghost" type="button" onClick={reset}>{t('products.reset')}</button>
+        <details className="more-filters" open={wide || undefined} key={wide ? 'w' : 'n'}>
+          <summary>{t('products.moreFilters')}{(get('q') || get('min') || get('max')) ? ' •' : ''}</summary>
+          <div className="more-grid">
+            <div className="field grow">
+              <label htmlFor="q">{t('products.search')}</label>
+              <input id="q" type="search" value={q} onChange={(e) => setQ(e.target.value)} maxLength={60} />
+            </div>
+            <div className="field narrow"><label htmlFor="min">{t('products.minPrice')}</label>
+              <input id="min" type="number" min="0" inputMode="numeric" value={get('min')} onChange={(e) => setParam('min', e.target.value)} /></div>
+            <div className="field narrow"><label htmlFor="max">{t('products.maxPrice')}</label>
+              <input id="max" type="number" min="0" inputMode="numeric" value={get('max')} onChange={(e) => setParam('max', e.target.value)} /></div>
+            <button className="btn btn-primary" type="submit">{t('common.search')}</button>
+            <button className="btn btn-ghost" type="button" onClick={reset}>{t('products.reset')}</button>
+          </div>
+        </details>
       </form>
 
       <Async state={catPending ? { loading: true, error: null, data: null } : list} empty={<>{t('products.empty')}</>} isEmpty={(d) => d.length === 0}>

@@ -1,10 +1,10 @@
 import { usePageMeta } from '../lib/meta.js';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useSettings } from '../context/SettingsContext.jsx';
 import { useCart } from '../context/CartContext.jsx';
 import { imageUrl } from '../lib/supabase.js';
-import { MAX_QTY, lineKey } from '../lib/shop.js';
+import { MAX_QTY, lineKey, lineTotal } from '../lib/shop.js';
 
 export function CartLines({ editable = true }) {
   const { t, lang, money } = useSettings();
@@ -26,12 +26,15 @@ export function CartLines({ editable = true }) {
             </div>
             {editable ? (
               <div className="line-actions">
-                <label className="sr" htmlFor={`q-${key}`}>{t('product.qty')}</label>
-                <input id={`q-${key}`} type="number" min="1" max={MAX_QTY} value={it.qty} onChange={(e) => update(key, Number(e.target.value))} />
-                <button className="btn btn-ghost" onClick={() => remove(key)}>{t('cart.remove')}</button>
+                <div className="stepper" role="group" aria-label={`${t('product.qty')}: ${name}`}>
+                  <button type="button" onClick={() => update(key, it.qty - 1)} disabled={it.qty <= 1} aria-label={t('cart.decrease')}>−</button>
+                  <output aria-live="polite">{it.qty}</output>
+                  <button type="button" onClick={() => update(key, it.qty + 1)} disabled={it.qty >= MAX_QTY} aria-label={t('cart.increase')}>+</button>
+                </div>
+                <button type="button" className="btn btn-ghost" onClick={() => remove(key)} aria-label={`${t('cart.remove')}: ${name}`}>{t('cart.remove')}</button>
               </div>
             ) : <span>× {it.qty}</span>}
-            <strong className="line-total">{money(it.price * it.qty)}</strong>
+            <strong className="line-total">{money(lineTotal(it.price, it.qty))}</strong>
           </li>
         );
       })}
@@ -42,20 +45,28 @@ export function CartLines({ editable = true }) {
 export default function Cart() {
   usePageMeta({ title: useSettings().t('nav.cart'), noindex: true });
   const { t, money } = useSettings();
-  const { items, subtotal, refresh, priceChanged, hasUnavailable } = useCart();
+  const { items, subtotal, refresh, priceChanged, hasUnavailable, clear, count } = useCart();
+  const [confirmClear, setConfirmClear] = useState(false);
   useEffect(() => { refresh().catch(() => {}); /* eslint-disable-next-line */ }, []);
   if (items.length === 0) return <section className="state"><h1>{t('cart.title')}</h1><p>{t('cart.empty')}</p><Link className="btn btn-primary" to="/products">{t('home.cta')}</Link></section>;
   return (
     <>
-      <h1>{t('cart.title')}</h1>
+      <div className="row"><h1>{t('cart.title')} <small className="muted">({count})</small></h1>
+        {confirmClear ? (
+          <span className="row" role="alert">{t('cart.clearConfirm')}
+            <button type="button" className="btn" onClick={() => { clear(); setConfirmClear(false); }}>{t('cart.clearYes')}</button>
+            <button type="button" className="btn btn-ghost" onClick={() => setConfirmClear(false)}>{t('common.cancel')}</button></span>
+        ) : <button type="button" className="btn btn-ghost" onClick={() => setConfirmClear(true)}>{t('cart.clear')}</button>}
+      </div>
       {priceChanged && <p className="notice" role="status">{t('cart.priceChanged')}</p>}
       <CartLines />
-      <div className="summary">
+      <div className="summary summary-sticky">
         <p className="row"><span>{t('cart.subtotal')}</span><strong>{money(subtotal)}</strong></p>
         <p className="muted">{t('cart.shippingNote')}</p>
+        {hasUnavailable && <p className="bad" role="alert">{t('cart.unavailableLine')}</p>}
         {hasUnavailable
-          ? <button className="btn btn-primary" disabled>{t('cart.checkout')}</button>
-          : <Link className="btn btn-primary" to="/checkout">{t('cart.checkout')}</Link>}
+          ? <button type="button" className="btn btn-primary btn-block" disabled>{t('cart.checkout')}</button>
+          : <Link className="btn btn-primary btn-block" to="/checkout">{t('cart.checkout')}</Link>}
       </div>
     </>
   );

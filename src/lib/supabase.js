@@ -14,6 +14,12 @@ export function imageUrl(path) {
   return supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
 }
 
+export const BANNER_BUCKET = 'banner-images';
+export function bannerImageUrl(path) {
+  if (!supabase || !path) return null;
+  return supabase.storage.from(BANNER_BUCKET).getPublicUrl(path).data.publicUrl;
+}
+
 // Turns a Supabase/PostgREST error into a translation key (err.*).
 export function errorKey(error) {
   if (!error) return 'err.generic';
