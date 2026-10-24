@@ -147,3 +147,8 @@ src/styles.css   كل الألوان والمسافات كمتغيرات CSS
 
 ## ترقية الواجهة (الهوية، الشرائح الترويجية، السلة، الجوال)
 اقرأ `docs/09-STOREFRONT-UPGRADE.md` (ما نُفّذ، ما اختُبر، وما لم يتم). هجرة SQL الجديدة: `supabase/12_storefront_banners.sql` — **لم تُنفَّذ بعد**، جرّبها على مشروع تطوير.
+
+---
+
+## Theme: STOPH black / chocolate brown / light gold
+See `docs/10-THEME-STOPH.md` (palette tokens, exceptions, checks, and the logo note).

@@ -159,8 +159,9 @@ for (const theme of ['dark', 'light']) {
     assert.deepEqual(fails, []);
   });
 }
-test('contrast: primary button (white on red) meets AA in both themes', () => {
-  const css = read('src/styles.css');
-  const red = css.match(/--red:\s*(#[0-9a-fA-F]{6})/)[1];
-  assert.ok(ratio('#ffffff', red) >= 4.5, `white on ${red} = ${ratio('#ffffff', red).toFixed(2)}`);
+test('contrast: primary button (dark text on brand gold) meets AA in both themes', () => {
+  for (const theme of ['dark', 'light']) {
+    const t = tokens(theme);
+    assert.ok(ratio(t['on-red'], '#D6B878') >= 4.5, `${theme}: ${t['on-red']} on gold = ${ratio(t['on-red'], '#D6B878').toFixed(2)}`);
+  }
 });

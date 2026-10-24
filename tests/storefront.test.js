@@ -180,16 +180,50 @@ test('official logo assets exist with the expected dimensions', () => {
   const [w, h] = dims('logo-wordmark.png'); assert.ok(w / h > 5 && w / h < 7);
   assert.match(read('index.html'), /viewport-fit=cover/);
 });
-test('brand colours come from the logo and keep AA contrast', () => {
+const PALETTE = { black: '#111111', brown: '#5C3828', gold: '#D6B878', goldSoft: '#E8D5A3', white: '#F5F1E8', gray: '#A8A29E' };
+const lum = (h) => { const c = [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; };
+const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+const themeTokens = (theme) => Object.fromEntries([...read('src/styles.css').match(new RegExp(`:root\\[data-theme='${theme}'\\]\\s*\\{([^}]*)\\}`))[1].matchAll(/--([a-z0-9-]+):\s*(#[0-9a-fA-F]{6})/g)].map((m) => [m[1], m[2].toUpperCase()]));
+
+test('STOPH palette: the six brand colours are defined exactly once as source tokens', () => {
   const css = read('src/styles.css');
-  const hex = (n) => css.match(new RegExp(`--${n}:\\s*(#[0-9a-fA-F]{6})`))[1];
-  const lum = (h) => { const c = [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; };
-  const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
-  assert.equal(hex('yellow').toLowerCase(), '#fed70a');                       // sampled from the logo
-  assert.ok(ratio('#ffffff', hex('red')) >= 4.5, 'white on brand red');
-  assert.ok(ratio('#111111', hex('yellow')) >= 4.5, 'dark text on brand yellow (CTA, sale badge)');
-  assert.ok(ratio(hex('yellow'), hex('brand-black')) >= 7, 'yellow links on the dark header/footer');
-  assert.ok(ratio('#cfcfd5', hex('brand-black')) >= 7, 'footer text');
+  const root = css.match(/:root \{([\s\S]*?)\n\}/)[1];
+  assert.match(root, /--c-black:\s*#111111/i); assert.match(root, /--c-brown:\s*#5C3828/i); assert.match(root, /--c-gold:\s*#D6B878/i);
+  assert.match(root, /--c-gold-soft:\s*#E8D5A3/i); assert.match(root, /--c-white:\s*#F5F1E8/i); assert.match(root, /--c-gray:\s*#A8A29E/i);
+  assert.match(root, /--red:\s*var\(--c-gold\)/);               // legacy "primary" token now resolves to gold
+  assert.equal(themeTokens('dark').bg, PALETTE.black); assert.equal(themeTokens('dark').text, PALETTE.white); assert.equal(themeTokens('dark').muted, PALETTE.gray);
+});
+test('STOPH palette: no legacy brand colours or random hues remain anywhere in the stylesheet / static head', () => {
+  const css = read('src/styles.css') + read('index.html') + read('public/favicon.svg');
+  for (const old of ['e10600', 'bf0500', 'fed70a', 'fe9201', 'f9030a', '5c0000', '050404', '0b0b0c', 'ff5a52', 'd4252c', '6fcf97', 'ff6b6b']) assert.ok(!css.toLowerCase().includes(old), `legacy colour #${old} still present`);
+  const allowed = new Set(['#111111', '#5C3828', '#D6B878', '#E8D5A3', '#F5F1E8', '#A8A29E',            // the brand palette
+    '#3F291F', '#2F211A', '#4A3F2E', '#3B3124', '#1E1712', '#2A1B14',                                   // brown/black blends (cards, fields, borders)
+    '#FBF8F1', '#EBE3D1', '#D6C9AE', '#5E5650',                                                         // light-theme warm tints
+    '#E8998A', '#9A3B2B',                                                                               // error text only (dark / light)
+    '#FFF']);                                                                                           // QR-code background (must stay white to be scannable)
+  const found = new Set([...read('src/styles.css').matchAll(/#[0-9a-fA-F]{3,6}\b/g)].map((m) => m[0].toUpperCase()));
+  assert.deepEqual([...found].filter((c) => !allowed.has(c)), []);
+  assert.doesNotMatch(read('src/styles.css'), /\b(blue|green|purple|violet|pink|teal|cyan)\b|hsl\(/i);
+});
+test('STOPH palette: required pairings meet WCAG AA (4.5:1 text, 3:1 UI)', () => {
+  const P = PALETTE; const fails = [];
+  const need = (name, a, b, min = 4.5) => { const r = ratio(a, b); if (r < min) fails.push(`${name}: ${r.toFixed(2)} < ${min}`); };
+  need('warm white on black', P.white, P.black); need('gray on black', P.gray, P.black); need('gold on black (icons/links)', P.gold, P.black);
+  need('black on gold (primary button)', P.black, P.gold); need('black on soft gold (hover)', P.black, P.goldSoft);
+  need('warm white on brown (selected, badges)', P.white, P.brown); need('gold on brown (badge border/icons)', P.gold, P.brown, 3);
+  const d = themeTokens('dark'); const l = themeTokens('light');
+  for (const bg of ['bg', 'surface', 'surface-2']) { for (const fg of ['text', 'muted', 'silver', 'ok', 'bad']) need(`dark ${fg} on ${bg}`, d[fg], d[bg]); need(`dark focus ring on ${bg}`, d.focus, d[bg], 3); }
+  for (const bg of ['bg', 'surface', 'surface-2']) { for (const fg of ['text', 'muted', 'silver', 'ok', 'bad', 'accent-strong']) need(`light ${fg} on ${bg}`, l[fg], l[bg]); need(`light focus ring on ${bg}`, l.focus, l[bg], 3); }
+  need('dark: border visible against page', d.border, d.bg, 1.5);
+  assert.deepEqual(fails, []);
+});
+test('STOPH palette: header, footer and bottom navigation are black in BOTH themes; focus ring on them is gold', () => {
+  const css = read('src/styles.css');
+  assert.match(css, /--brand-black:\s*var\(--c-black\)/);
+  assert.match(css, /\.store-header \{ background: var\(--brand-black\)/);
+  assert.match(css, /\.site-footer \{ background: var\(--brand-black\)/);
+  assert.match(css, /\.bottom-nav \{[^}]*background: var\(--brand-black\)/);
+  assert.match(css, /\.store-header :focus-visible[^{]*\{ outline-color: var\(--yellow\)/);
 });
 test('translations: new storefront/admin keys exist in both languages (also covered by phase3 suite)', async () => {
   const { dictionary } = await import('../src/i18n/dictionary.js');
