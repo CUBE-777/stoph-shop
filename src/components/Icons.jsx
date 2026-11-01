@@ -18,3 +18,5 @@ export const IconPlay = I(<path d="m8 5 11 7-11 7Z" />);
 export const IconTruck = I(<><path d="M3 6h11v10H3zM14 9h4l3 3v4h-7" /><circle cx="7.500" cy="17.500" r="1.600" /><circle cx="17" cy="17.500" r="1.600" /></>);
 export const IconShield = I(<path d="M12 3 4.500 6v5.500c0 4.500 3.200 8 7.500 9.500 4.300-1.500 7.500-5 7.500-9.500V6L12 3Z" />);
 export const IconPhone = I(<path d="M6.500 3.500h3l1.500 4-2 1.500a11 11 0 0 0 6 6l1.500-2 4 1.500v3a2 2 0 0 1-2 2C10.800 19.500 4.500 13.200 4.500 5.500a2 2 0 0 1 2-2Z" />);
+export const IconDots = I(<><circle cx="5.500" cy="12" r="1.300" /><circle cx="12" cy="12" r="1.300" /><circle cx="18.500" cy="12" r="1.300" /></>);
+export const IconChart = I(<path d="M4 20V10M10 20V4M16 20v-7M22 20H2" />);

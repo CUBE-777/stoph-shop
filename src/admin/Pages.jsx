@@ -102,39 +102,61 @@ export function Orders() {
   const empty = { number: '', status: '', phone: '', city: '', from: '', to: '' };
   const [draft, setDraft] = useState(empty);
   const [filters, setFilters] = useState(empty);
+  const [q, setQ] = useState('');                 // one box: short digit strings are order numbers, anything else is a phone
+  const [adv, setAdv] = useState(false);
   const [page, setPage] = useState(0);
   const state = useAsync(() => adminOrders(filters, page), [JSON.stringify(filters), page]);
   const fmt = (d) => new Date(d).toLocaleString(lang === 'ar' ? 'ar-MA-u-nu-latn' : 'fr-MA', { dateStyle: 'short', timeStyle: 'short' });
   const set = (k) => (e) => setDraft({ ...draft, [k]: e.target.value });
-  const apply = (e) => { e.preventDefault(); setPage(0); setFilters(draft); };
-  const reset = () => { setDraft(empty); setFilters(empty); setPage(0); };
+  const fromQuery = (text) => {
+    const v = text.trim();
+    return /^\d{1,8}$/.test(v) ? { number: v, phone: '' } : { number: '', phone: v };
+  };
+  const apply = (e) => { e.preventDefault(); setPage(0); setFilters({ ...draft, ...fromQuery(q) }); };
+  const pickStatus = (s) => { setPage(0); setDraft({ ...draft, status: s }); setFilters({ ...draft, ...fromQuery(q), status: s }); };
+  const reset = () => { setDraft(empty); setFilters(empty); setQ(''); setPage(0); };
+  const advActive = !!(filters.city || filters.from || filters.to);
   return (
     <>
       <h1>{t('admin.nav.orders')}</h1>
-      <form onSubmit={apply} className="filters-orders" role="search">
-        <Field label={t('admin.orders.search')} htmlFor="f-num"><input id="f-num" inputMode="numeric" value={draft.number} onChange={set('number')} maxLength={12} /></Field>
-        <Field label={t('admin.orders.filter')} htmlFor="f-st">
-          <select id="f-st" value={draft.status} onChange={set('status')}>
-            <option value="">{t('common.all')}</option>
-            {ORDER_STATUSES.map((s) => <option key={s} value={s}>{t(`status.${s}`)}</option>)}
-          </select>
-        </Field>
-        <Field label={t('admin.orders.phone')} htmlFor="f-ph"><input id="f-ph" dir="ltr" inputMode="tel" value={draft.phone} onChange={set('phone')} maxLength={20} /></Field>
-        <Field label={t('admin.orders.city')} htmlFor="f-city"><input id="f-city" value={draft.city} onChange={set('city')} maxLength={40} /></Field>
-        <Field label={t('admin.orders.from')} htmlFor="f-from"><input id="f-from" type="date" value={draft.from} onChange={set('from')} /></Field>
-        <Field label={t('admin.orders.to')} htmlFor="f-to"><input id="f-to" type="date" value={draft.to} onChange={set('to')} /></Field>
-        <div className="row"><button className="btn btn-primary">{t('common.search')}</button><button type="button" className="btn btn-ghost" onClick={reset}>{t('admin.orders.reset')}</button></div>
+      <form onSubmit={apply} className="orders-filters" role="search">
+        <div className="orders-search">
+          <input type="search" aria-label={t('admin.orders.search2')} placeholder={t('admin.orders.search2')} enterKeyHint="search" autoComplete="off" inputMode="search" dir="ltr"
+            value={q} onChange={(e) => setQ(e.target.value)} maxLength={20} />
+          <button className="btn btn-primary">{t('common.search')}</button>
+        </div>
+        <div className="chips" role="group" aria-label={t('admin.orders.filter')}>
+          <button type="button" className={`chip${filters.status === '' ? ' active' : ''}`} aria-pressed={filters.status === ''} onClick={() => pickStatus('')}>{t('common.all')}</button>
+          {ORDER_STATUSES.map((s) => <button type="button" key={s} className={`chip${filters.status === s ? ' active' : ''}`} aria-pressed={filters.status === s} onClick={() => pickStatus(s)}>{t(`status.${s}`)}</button>)}
+        </div>
+        <div className="row">
+          <button type="button" className="btn btn-ghost" aria-expanded={adv} aria-controls="adv-filters" onClick={() => setAdv((v) => !v)}>
+            {adv ? t('admin.orders.lessFilters') : t('admin.orders.moreFilters')}{advActive && !adv ? ' •' : ''}
+          </button>
+          <button type="button" className="btn btn-ghost" onClick={reset}>{t('admin.orders.reset')}</button>
+        </div>
+        {adv && (
+          <div id="adv-filters" className="filters-orders">
+            <Field label={t('admin.orders.city')} htmlFor="f-city"><input id="f-city" value={draft.city} onChange={set('city')} maxLength={40} /></Field>
+            <Field label={t('admin.orders.from')} htmlFor="f-from"><input id="f-from" type="date" value={draft.from} onChange={set('from')} /></Field>
+            <Field label={t('admin.orders.to')} htmlFor="f-to"><input id="f-to" type="date" value={draft.to} onChange={set('to')} /></Field>
+            <div className="row"><button className="btn btn-primary">{t('common.search')}</button></div>
+          </div>
+        )}
       </form>
       <Async state={state} empty={t('admin.orders.empty')} isEmpty={(d) => d.rows.length === 0}>
         {({ rows: d, total }) => (
           <>
-          <div className="table-wrap"><table>
+          <div className="table-wrap"><table className="cards">
             <thead><tr><th>{t('admin.orders.number')}</th><th>{t('admin.orders.customer')}</th><th>{t('checkout.city')}</th><th>{t('checkout.total')}</th><th>{t('admin.orders.date')}</th><th></th></tr></thead>
             <tbody>{d.map((o) => (
               <tr key={o.id}>
-                <td dir="ltr">#{o.order_number}</td><td>{o.customer_name}<br /><small dir="ltr">{o.phone}</small></td><td>{o.city}</td>
-                <td>{money(o.total)}</td><td>{fmt(o.created_at)}</td>
-                <td><span className={`pill st-${o.status}`}>{t(`status.${o.status}`)}</span> <Link className="btn" to={`/admin/orders/${o.id}`}>{t('common.edit')}</Link></td>
+                <td data-label={t('admin.orders.number')} className="c-title" dir="ltr">#{o.order_number}</td>
+                <td data-label={t('admin.orders.customer')}>{o.customer_name}<br /><a className="tel" dir="ltr" href={`tel:${o.phone}`}>{o.phone}</a></td>
+                <td data-label={t('checkout.city')}>{o.city}</td>
+                <td data-label={t('checkout.total')}>{money(o.total)}</td>
+                <td data-label={t('admin.orders.date')}>{fmt(o.created_at)}</td>
+                <td className="c-actions"><span className={`pill st-${o.status}`}>{t(`status.${o.status}`)}</span> <Link className="btn" to={`/admin/orders/${o.id}`}>{t('common.edit')}</Link></td>
               </tr>
             ))}</tbody>
           </table></div>
@@ -165,6 +187,7 @@ export function OrderDetail() {
     <Async state={state}>
       {(o) => {
         const next = GENERIC_STATUS_TARGETS(o.status, can);
+        const forward = next[0] || null;   // primary 'move on' action for the phone action bar
         const wa = whatsappUrl(o.phone, whatsappMessage(lang, {
           firstName: o.customer_name.split(' ')[0], orderNumber: o.order_number,
           items: o.order_items.map((i) => ({ name: loc(i, 'product_name'), variant: loc(i, 'variant_label'), qty: i.quantity })),
@@ -190,10 +213,10 @@ export function OrderDetail() {
                 <small className="muted"> {t('admin.orders.whatsappNote')}</small></p>
             )}
             <h2>{t('admin.orders.items')}</h2>
-            <div className="table-wrap"><table>
+            <div className="table-wrap"><table className="cards cards-items">
               <tbody>{o.order_items.map((i) => (
                 <tr key={i.id}>
-                  <td>{loc(i, 'product_name')}{(i.variant_label_ar || i.variant_label_fr) && <> — {loc(i, 'variant_label')}</>}</td>
+                  <td className="c-title">{loc(i, 'product_name')}{(i.variant_label_ar || i.variant_label_fr) && <> — {loc(i, 'variant_label')}</>}</td>
                   <td>{money(i.unit_final_price)}{i.discount_per_unit > 0 && <small className="muted"> ({t('product.sale')} −{money(i.discount_per_unit)})</small>}</td>
                   <td>× {i.quantity}</td><td>{money(i.line_total)}</td>
                 </tr>))}</tbody>
@@ -210,7 +233,7 @@ export function OrderDetail() {
               {next.length === 0 ? <p className="muted">{t('admin.orders.noNext')}</p> : (
                 <>
                   <Field label={t('admin.orders.note')} htmlFor="note"><input id="note" value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} /></Field>
-                  <div className="row">{next.map((s) => <button key={s} className="btn" onClick={() => change(s)}>{t(`status.${s}`)}</button>)}</div>
+                  <div className="row status-actions">{next.map((s) => <button key={s} className="btn" onClick={() => change(s)}>{t(`status.${s}`)}</button>)}</div>
                 </>
               )}
               {msg && <p className="bad" role="alert">{msg}</p>}
@@ -233,6 +256,12 @@ export function OrderDetail() {
                 </ul>
               )}
             </Async>
+
+            <div className="action-bar" role="group" aria-label={t('admin.orders.nextAction')}>
+              <a className="btn" href={`tel:${o.phone}`}>{t('admin.orders.call')}</a>
+              {wa && <a className="btn" href={wa} target="_blank" rel="noopener noreferrer">{t('admin.orders.whatsapp')}</a>}
+              {forward && <button className="btn btn-primary" onClick={() => change(forward)}>{t(`status.${forward}`)}</button>}
+            </div>
           </>
         );
       }}

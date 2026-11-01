@@ -21,19 +21,19 @@ export function ProductList() {
       <div className="row"><h1>{t('admin.nav.products')}</h1>{can('products.create') && <Link className="btn btn-primary" to="/admin/products/new">{t('admin.products.new')}</Link>}</div>
       <Async state={state} empty={t('admin.products.empty')} isEmpty={(d) => d.length === 0}>
         {(d) => (
-          <div className="table-wrap"><table>
+          <div className="table-wrap"><table className="cards cards-products">
             <thead><tr><th></th><th>{t('admin.f.nameFr')}</th><th>{t('admin.f.price')}</th><th>{t('common.active')}</th><th>{t('product.available')}</th><th>{t('common.actions')}</th></tr></thead>
             <tbody>{d.map((p) => {
               const img = [...p.product_images].sort((a, b) => a.sort_order - b.sort_order)[0];
               const { available } = productAvailability(p);
               return (
                 <tr key={p.id}>
-                  <td>{img ? <img className="thumb" src={imageUrl(img.path)} alt="" /> : <span className="thumb img-ph" />}</td>
-                  <td>{loc(p, 'name')}</td>
-                  <td>{money(p.sale_price ?? p.price)}</td>
-                  <td>{p.is_published ? t('common.yes') : t('common.no')}</td>
-                  <td>{available ? t('common.yes') : t('common.no')}</td>
-                  <td className="actions">{can('products.update') && <Link className="btn" to={`/admin/products/${p.id}`}>{t('common.edit')}</Link>}
+                  <td className="c-thumb">{img ? <img className="thumb" src={imageUrl(img.path)} alt="" /> : <span className="thumb img-ph" />}</td>
+                  <td className="c-title">{loc(p, 'name')}</td>
+                  <td data-label={t('admin.f.price')}>{money(p.sale_price ?? p.price)}</td>
+                  <td data-label={t('common.active')}>{p.is_published ? t('common.yes') : t('common.no')}</td>
+                  <td data-label={t('product.available')}>{available ? t('common.yes') : t('common.no')}</td>
+                  <td className="actions c-actions">{can('products.update') && <Link className="btn" to={`/admin/products/${p.id}`}>{t('common.edit')}</Link>}
                     {can('products.delete') && <button className="btn btn-ghost" onClick={() => remove(p)}>{t('common.delete')}</button>}</td>
                 </tr>
               );

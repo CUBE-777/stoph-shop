@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link, NavLink, Navigate, Route, Routes } from 'react-router-dom';
+import { Link, NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { useSettings } from '../context/SettingsContext.jsx';
 import { isConfigured } from '../lib/supabase.js';
 import { getSession, isOwner, mfaAal, mfaStatus, myPermissions, newOrdersFeed, onAuthChange, signOut } from '../services/admin.js';
@@ -8,6 +8,7 @@ import { MfaChallenge, MfaEnroll, Security } from './Mfa.jsx';
 import { Returns } from './Returns.jsx';
 import { Banners } from './Banners.jsx';
 import { Logo } from '../components/ui.jsx';
+import { IconBox, IconChart, IconClose, IconDots, IconGrid, IconHome } from '../components/Icons.jsx';
 import { usePageMeta } from '../lib/meta.js';
 import { AdminContext } from './context.js';
 import { Categories, Dashboard, Login, OrderDetail, Orders, Settings, Shipping } from './Pages.jsx';
@@ -18,39 +19,107 @@ import { Audit, Staff } from './Staff.jsx';
 
 const SEEN_KEY = 'stoph.admin.seen';
 
-// Polls every 30s for orders created since the last time the admin acknowledged them.
-function NewOrdersBanner() {
-  const { t, money } = useSettings();
+// Polls every 30s (only while the tab is visible) for orders created since the admin last acknowledged them.
+function useNewOrders(enabled) {
   const [feed, setFeed] = useState(null);
   const baseTitle = useMemo(() => document.title, []);
 
   useEffect(() => {
+    if (!enabled) return undefined;
     let alive = true;
     const since = () => localStorage.getItem(SEEN_KEY) || new Date().toISOString();
     if (!localStorage.getItem(SEEN_KEY)) localStorage.setItem(SEEN_KEY, new Date().toISOString());
     const poll = async () => {
-      try { const f = await newOrdersFeed(since()); if (alive) setFeed(f); } catch { /* keep last state */ }
+      if (document.visibilityState === 'hidden') return;
+      try {
+        const f = await newOrdersFeed(since());
+        if (!alive) return;
+        setFeed((prev) => {
+          // a short buzz on phones when a new order arrives
+          if (prev && f.count > prev.count && navigator.vibrate) { try { navigator.vibrate(120); } catch { /* unsupported */ } }
+          return f;
+        });
+      } catch { /* keep last state */ }
     };
     poll();
     const id = setInterval(poll, 30000);
-    return () => { alive = false; clearInterval(id); document.title = baseTitle; };
-  }, [baseTitle]);
+    document.addEventListener('visibilitychange', poll);
+    return () => { alive = false; clearInterval(id); document.removeEventListener('visibilitychange', poll); document.title = baseTitle; };
+  }, [enabled, baseTitle]);
 
   useEffect(() => { document.title = feed?.count > 0 ? `(${feed.count}) ${baseTitle}` : baseTitle; }, [feed, baseTitle]);
 
+  const dismiss = () => { if (!feed) return; localStorage.setItem(SEEN_KEY, feed.now); setFeed({ ...feed, count: 0 }); };
+  return { feed, dismiss };
+}
+
+function NewOrdersBanner({ feed, dismiss }) {
+  const { t, money } = useSettings();
   if (!feed || feed.count === 0) return null;
-  const dismiss = () => { localStorage.setItem(SEEN_KEY, feed.now); setFeed({ ...feed, count: 0 }); };
   return (
-    <div className="banner" role="alert">
+    <div className="banner new-orders" role="alert">
       <div className="container">
         <strong>{feed.count} {t('admin.newOrders')}</strong>
-        <span className="muted">{feed.latest.map((o) => `#${o.order_number} · ${o.city} · ${money(o.total)}`).join('  |  ')}</span>
-        <span>
+        <span className="muted no-phone">{feed.latest.map((o) => `#${o.order_number} · ${o.city} · ${money(o.total)}`).join('  |  ')}</span>
+        <span className="no-orders-actions">
           <Link className="btn btn-primary" to="/admin/orders" onClick={dismiss}>{t('admin.newOrders.view')}</Link>{' '}
           <button className="btn btn-ghost" onClick={dismiss}>{t('admin.newOrders.dismiss')}</button>
         </span>
       </div>
     </div>
+  );
+}
+
+// Phone navigation: 3 primary sections + a "More" drawer holding everything else (desktop keeps the top nav).
+function AdminBottomNav({ nav, newCount, onSignOut }) {
+  const { t } = useSettings();
+  const { pathname } = useLocation();
+  const [open, setOpen] = useState(false);
+  useEffect(() => { setOpen(false); }, [pathname]);
+  useEffect(() => {
+    if (!open) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open]);
+
+  const icons = { '': IconHome, orders: IconBox, products: IconGrid, reports: IconChart };
+  const preferred = ['', 'orders', 'products'];
+  let primary = preferred.map((k) => nav.find((n) => n[0] === k)).filter(Boolean);
+  if (primary.length < 3) primary = [...primary, ...nav.filter((n) => !primary.includes(n)).slice(0, 3 - primary.length)];
+  const rest = nav.filter((n) => !primary.includes(n));
+
+  return (
+    <>
+      <nav className="admin-bottom" aria-label={t('admin.nav.quick')}>
+        {primary.map(([to, label, , end]) => {
+          const Ico = icons[to] || IconGrid;
+          return (
+            <NavLink key={to} to={`/admin/${to}`} end={end || undefined}>
+              <span className="bn-ico"><Ico />{to === 'orders' && newCount > 0 && <span className="count">{newCount > 99 ? '99+' : newCount}</span>}</span>
+              <span>{label}</span>
+            </NavLink>
+          );
+        })}
+        <button type="button" className={open ? 'active' : ''} aria-expanded={open} aria-controls="admin-drawer" onClick={() => setOpen((o) => !o)}>
+          <span className="bn-ico"><IconDots /></span><span>{t('admin.nav.more')}</span>
+        </button>
+      </nav>
+      {open && (
+        <>
+          <button type="button" className="scrim admin-scrim" aria-label={t('admin.nav.close')} onClick={() => setOpen(false)} />
+          <div id="admin-drawer" className="admin-drawer" role="dialog" aria-label={t('admin.nav.more')}>
+            <div className="row-head"><strong>{t('admin.nav.more')}</strong>
+              <button type="button" className="btn btn-ghost" aria-label={t('admin.nav.close')} onClick={() => setOpen(false)}><IconClose /></button></div>
+            <ul>
+              {rest.map(([to, label]) => <li key={to}><NavLink to={`/admin/${to}`}>{label}</NavLink></li>)}
+              <li><Link to="/">{t('admin.nav.store')}</Link></li>
+            </ul>
+            <button type="button" className="btn btn-block" onClick={onSignOut}>{t('admin.signout')}</button>
+          </div>
+        </>
+      )}
+    </>
   );
 }
 
@@ -84,6 +153,9 @@ export default function AdminApp() {
       isOwner().then(setOwner).catch(() => setOwner(false));
     }
   }, [session, gate]);
+
+  const ordersLive = !!session && gate === 'ok' && (perms || []).includes('orders.view');
+  const orders = useNewOrders(ordersLive);
 
   const ctx = useMemo(() => ({ perms: perms || [], can: (p) => (perms || []).includes(p), userId: session?.user?.id || null, isOwner: owner }), [perms, session, owner]);
 
@@ -125,13 +197,13 @@ export default function AdminApp() {
       <div className="admin">
         <header className="site-header"><div className="container bar">
           <Link to="/admin" className="brand"><Logo /> <small className="muted">{t('admin.title')}</small></Link>
-          <nav className="nav open admin-nav" aria-label="Admin">
+          <nav className="nav open admin-nav only-wide-nav" aria-label="Admin">
             {nav.map(([to, label, , end]) => <NavLink key={to} to={`/admin/${to}`} end={end}>{label}</NavLink>)}
             <Link to="/">{t('admin.nav.store')}</Link>
           </nav>
           <button className="btn btn-ghost" onClick={signOut}>{t('admin.signout')}</button>
         </div></header>
-        {can('orders.view') && <NewOrdersBanner />}
+        {can('orders.view') && <NewOrdersBanner feed={orders.feed} dismiss={orders.dismiss} />}
         <main className="container main">
           <Routes>
             <Route index element={can('orders.view') ? <Dashboard /> : <Navigate to="settings" replace />} />
@@ -155,6 +227,7 @@ export default function AdminApp() {
             <Route path="*" element={<Navigate to="/admin" replace />} />
           </Routes>
         </main>
+        <AdminBottomNav nav={nav} newCount={orders.feed?.count || 0} onSignOut={signOut} />
       </div>
     </AdminContext.Provider>
   );
